@@ -5,6 +5,21 @@ import type { AssetInfo, CropRect, Point } from "../placement/projectDoc";
  * a point maps x' = a·x + c·y (+ e), y' = b·x + d·y (+ f). */
 export interface Warp2 { a: number; b: number; c: number; d: number }
 
+/** 3x3 projective map source px → straightened source px, h33 = 1 implicit:
+ * x' = (a·x + b·y + c) / (g·x + h·y + 1);
+ * y' = (d·x + e·y + f) / (g·x + h·y + 1).
+ * Set only by Deskew; absent = identity. */
+export interface Perspective3 {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+  g: number;
+  h: number;
+}
+
 export interface VisualImage {
   id: string; name: string; assetHash: string; width: number; height: number;
   x: number; y: number; flipH: boolean; flipV: boolean; visible: boolean;
@@ -21,6 +36,11 @@ export interface VisualImage {
    * the linear part L = warp · rotation · flip · scale). Absent = identity;
    * validated |det| > 1e-9. Mirrored mappings (negative det) are allowed. */
   warp?: Warp2;
+  /** Projective deskew map (source px → straightened source px, applied
+   * innermost, before the crop). Set only by Deskew; absent = identity;
+   * all coefficients finite, |det| > 1e-9, no denominator pole over the
+   * photograph. */
+  perspective?: Perspective3;
 }
 export interface CopperNet { id: string; name: string; color: string }
 export interface CopperTrace { id: string; layerId: string; points: Point[]; width: number; netId?: string }

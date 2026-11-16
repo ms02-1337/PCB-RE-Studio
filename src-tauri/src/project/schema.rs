@@ -318,6 +318,21 @@ pub struct VisualWarp {
     pub c: f64,
     pub d: f64,
 }
+/// 3x3 projective map source px → straightened source px with h33 = 1
+/// implicit: x' = (a·x + b·y + c) / (g·x + h·y + 1), y' = (d·x + e·y + f) /
+/// (g·x + h·y + 1). Set only by Deskew; absent = identity.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VisualPerspective {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub e: f64,
+    pub f: f64,
+    pub g: f64,
+    pub h: f64,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisualImage {
@@ -354,6 +369,14 @@ pub struct VisualImage {
     /// determinants mirror, which is allowed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warp: Option<VisualWarp>,
+    /// Projective deskew map (source px → straightened source px, applied
+    /// innermost in the render pipeline); absent = identity. All
+    /// coefficients finite with |det| > 1e-9, an invertible linear part
+    /// (|a·e − b·d| > 1e-9 — the JS inverse divides by it) and no
+    /// denominator pole over the photograph (w = 1 + g·x + h·y > 1e-9 at
+    /// the image corners).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perspective: Option<VisualPerspective>,
 }
 
 pub fn seed_types() -> Vec<ComponentType> {
@@ -671,6 +694,44 @@ pub fn validate(doc: &ProjectDoc) -> ProjectResult<()> {
                             "visual image {} warp requires |det| > 1e-9",
                             image.id
                         ));
+                    }
+                }
+                if let Some(p) = image.perspective {
+                    if !finite(&[p.a, p.b, p.c, p.d, p.e, p.f, p.g, p.h]) {
+                        errors.push(format!(
+                            "visual image {} perspective coefficients must be finite",
+                            image.id
+                        ));
+                    } else {
+                        let det = p.a * (p.e - p.f * p.h) - p.b * (p.d - p.f * p.g)
+                            + p.c * (p.d * p.h - p.e * p.g);
+                        if det.abs() <= 1e-9 {
+                            errors.push(format!(
+                                "visual image {} perspective requires |det| > 1e-9",
+                                image.id
+                            ));
+                        }
+                        // The JS inverse divides by the linear part's
+                        // determinant; a 3x3-invertible map with that part
+                        // singular would NaN every inverse. Reject it here.
+                        if (p.a * p.e - p.b * p.d).abs() <= 1e-9 {
+                            errors.push(format!(
+                                "visual image {} perspective requires an invertible linear part",
+                                image.id
+                            ));
+                        }
+                        let corners = [
+                            (0.0, 0.0),
+                            (image.width as f64, 0.0),
+                            (image.width as f64, image.height as f64),
+                            (0.0, image.height as f64),
+                        ];
+                        if corners.iter().any(|(x, y)| 1.0 + p.g * x + p.h * y <= 1e-9) {
+                            errors.push(format!(
+                                "visual image {} perspective must have no denominator pole over the photograph",
+                                image.id
+                            ));
+                        }
                     }
                 }
                 if let Some(crop) = image.crop {
@@ -1118,6 +1179,16 @@ mod tests {
                         c: -0.05,
                         d: 0.9,
                     }),
+                    perspective: Some(VisualPerspective {
+                        a: 1.02,
+                        b: 0.001,
+                        c: 0.5,
+                        d: -0.001,
+                        e: 1.01,
+                        f: -0.25,
+                        g: 1.0e-6,
+                        h: 2.0e-6,
+                    }),
                 }],
             }],
         });
@@ -1171,6 +1242,9 @@ mod tests {
         assert!(json.contains("\"scaleX\":1.25"));
         assert!(json.contains("\"scaleY\":0.75"));
         assert!(json.contains("\"warp\":{\"a\":1.0,\"b\":0.1,\"c\":-0.05,\"d\":0.9}"));
+        // ryu prints the tiny off-diagonal terms in exponent notation.
+        assert!(json.contains("\"perspective\":{\"a\":1.02,\"b\":0.001,\"c\":0.5,\"d\":-0.001,\"e\":1.01,\"f\":-0.25,\"g\":1e-6,\"h\":2e-6}"));
+
         assert!(json.contains("\"pxPerMm\":3.78"));
         let restored: ProjectDoc = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, doc);
@@ -1186,7 +1260,14 @@ mod tests {
         let pcb = value["visualEditor"]["pcbs"][0].as_object_mut().unwrap();
         pcb.remove("pxPerMm");
         let image = pcb["images"][0].as_object_mut().unwrap();
-        for key in ["crop", "rotation", "scaleX", "scaleY", "warp"] {
+        for key in [
+            "crop",
+            "rotation",
+            "scaleX",
+            "scaleY",
+            "warp",
+            "perspective",
+        ] {
             image.remove(key);
         }
         let parsed: ProjectDoc = serde_json::from_value(value).unwrap();
@@ -1198,10 +1279,11 @@ mod tests {
         assert!(image.scale_x.is_none());
         assert!(image.scale_y.is_none());
         assert!(image.warp.is_none());
+        assert!(image.perspective.is_none());
         assert!(validate(&parsed).is_ok());
         // Reload+save keeps the file byte-identical and the fields absent.
         let saved = serde_json::to_string(&parsed).unwrap();
-        for absent in ["pxPerMm", "scaleX", "scaleY", "warp", "crop"] {
+        for absent in ["pxPerMm", "scaleX", "scaleY", "warp", "crop", "perspective"] {
             assert!(
                 !saved.contains(absent),
                 "{absent} leaked into the legacy file"
@@ -1293,6 +1375,75 @@ mod tests {
             c: 0.0,
             d: 1.0,
         });
+        assert!(validate(&doc).is_ok());
+
+        // Perspective: all-finite, |det| > 1e-9, and pole-free over the photo.
+        let degenerate = VisualPerspective {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            d: 0.0,
+            e: 0.0,
+            f: 0.0,
+            g: 0.0,
+            h: 0.0,
+        };
+        for perspective in [
+            VisualPerspective {
+                a: f64::NAN,
+                b: 0.001,
+                c: 0.0,
+                d: 0.0,
+                e: 1.0,
+                f: 0.0,
+                g: 0.0,
+                h: 0.0,
+            },
+            degenerate,
+            // Pole: h = −0.01 sends the denominator negative across the
+            // 200px-tall fixture image (1 − 0.01·200 < 0 at the bottom).
+            VisualPerspective {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: 0.0,
+                e: 1.0,
+                f: 0.0,
+                g: 0.0,
+                h: -0.01,
+            },
+            // Singular linear part with full det = 1 and no pole (w = 1 + y
+            // stays positive over the photo): invertible as a 3x3, but every
+            // numerator collapses onto a line, so inverses would NaN.
+            VisualPerspective {
+                a: 1.0,
+                b: 2.0,
+                c: 1.0,
+                d: 2.0,
+                e: 4.0,
+                f: 1.0,
+                g: 0.0,
+                h: 1.0,
+            },
+        ] {
+            let mut doc = visual_doc();
+            doc.visual_editor.as_mut().unwrap().pcbs[0].images[0].perspective = Some(perspective);
+            let detail = validate(&doc).unwrap_err().detail.unwrap();
+            assert!(detail.contains("perspective"), "unexpected error: {detail}");
+        }
+        // A mild, well-conditioned perspective passes validation.
+        let mut doc = visual_doc();
+        doc.visual_editor.as_mut().unwrap().pcbs[0].images[0].perspective =
+            Some(VisualPerspective {
+                a: 0.98,
+                b: -0.002,
+                c: 1.5,
+                d: 0.003,
+                e: 0.99,
+                f: -1.0,
+                g: -5.0e-7,
+                h: 4.0e-7,
+            });
         assert!(validate(&doc).is_ok());
 
         // Crop: positive size and inside the 100x200 source image.

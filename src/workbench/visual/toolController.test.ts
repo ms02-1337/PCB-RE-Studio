@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { Point } from "../placement/projectDoc";
 import type { VisualImage, Warp2 } from "./model";
-import { composeWarpLeft, imageAnchor, normalizeRotation, rotationMatrix, sourceToWorld, worldToSource } from "./transform";
+import { applyPerspective, composeWarpLeft, imageAnchor, normalizeRotation, rotationMatrix, sortQuadCorners, sourceToWorld, worldToSource } from "./transform";
 import {
   createVisualToolController,
   type OverlayView,
@@ -618,5 +618,178 @@ describe("resize (AC17)", () => {
     expect(item(c, "banner")!.text).toContain("1/2"); // still step 1, no new prompt
     expect(c.modalResult(10)).toEqual([]);
     expect(item(c, "banner")!.text).toContain("2/2");
+  });
+});
+
+describe("deskew (AC9-AC12)", () => {
+  /** mkImage() sits at (10,20) with 200x100: footprint (10,20)-(210,120).
+   * The default 800x600 viewport contains it, so the initial quad is the
+   * footprint inset by 20% on every side. */
+  const initialQuad = [
+    { x: 50, y: 40 }, { x: 170, y: 40 }, { x: 170, y: 100 }, { x: 50, y: 100 },
+  ];
+
+  it("begins with a 20%-inset quad inside the footprint, replaces on re-begin, cancels on Esc (AC9)", () => {
+    const c = start("deskew", mkImage());
+    const quad = item(c, "deskewQuad")!;
+    expect(quad.corners).toEqual(initialQuad);
+    expect(quad.dragging).toBeNull();
+    expect(quad.moving).toBe(false);
+    expect(item(c, "banner")!.text).toBe("DESKEW — drag the corner handles, or drag inside to move all; ENTER applies, ESC cancels");
+    // the initial quad stays inside the photo through the inverse pipeline
+    for (const p of quad.corners) {
+      const s = worldToSource(mkImage(), p);
+      expect(s.x).toBeGreaterThanOrEqual(-1);
+      expect(s.x).toBeLessThanOrEqual(201);
+      expect(s.y).toBeGreaterThanOrEqual(-1);
+      expect(s.y).toBeLessThanOrEqual(101);
+    }
+    // re-begin replaces prior state with a fresh quad
+    c.pointer(ev("down", [50, 40], [50, 40]));
+    c.pointer(ev("move", [20, 25], [20, 25]));
+    c.pointer(ev("up", [20, 25], [20, 25]));
+    expect(item(c, "deskewQuad")!.corners[0]).toEqual({ x: 20, y: 25 });
+    expect(c.begin("deskew", mkImage(), undefined)).toEqual([]);
+    expect(item(c, "deskewQuad")!.corners).toEqual(initialQuad);
+    // Esc exits through the canvas cancel path
+    expect(c.cancel()).toEqual([]);
+    expect(c.tool()).toBeNull();
+    expect(c.overlay()).toEqual([]);
+  });
+
+  it("clips the initial quad to the intersection of viewport and footprint", () => {
+    const view: OverlayView = { scale: 4, offsetX: 100, offsetY: 50, flipX: false, flipY: false, width: 800, height: 600 };
+    const c = start("deskew", mkImage(), undefined, view);
+    // world viewport (−25,−12.5)-(175,137.5) ∩ footprint (10,20)-(210,120)
+    // = (10,20)-(175,120); inset 20% → (43,40)-(142,100)
+    expect(item(c, "deskewQuad")!.corners).toEqual([
+      { x: 43, y: 40 }, { x: 142, y: 40 }, { x: 142, y: 100 }, { x: 43, y: 100 },
+    ]);
+  });
+
+  it("rejects locked images with a toast", () => {
+    const c = createVisualToolController();
+    expect(c.begin("deskew", mkImage({ locked: true }), undefined)).toEqual([{ kind: "toast", message: "Image is locked" }]);
+    expect(c.tool()).toBeNull();
+    expect(c.overlay()).toEqual([]);
+  });
+
+  it("dragging a handle moves only that corner; dragging inside translates all four (AC10)", () => {
+    const c = start("deskew", mkImage());
+    // 10.6 screen px from the TL handle (50,40) — inside the 14 px grab radius
+    c.pointer(ev("down", [58, 47], [58, 47]));
+    let quad = item(c, "deskewQuad")!;
+    expect(quad.dragging).toBe(0);
+    expect(quad.moving).toBe(false);
+    c.pointer(ev("move", [14, 30], [14, 30]));
+    quad = item(c, "deskewQuad")!;
+    expect(quad.corners[0]).toEqual({ x: 14, y: 30 });
+    expect(quad.corners[1]).toEqual({ x: 170, y: 40 }); // the other corners hold still
+    expect(quad.corners[2]).toEqual({ x: 170, y: 100 });
+    expect(quad.corners[3]).toEqual({ x: 50, y: 100 });
+    c.pointer(ev("up", [14, 30], [14, 30]));
+    expect(item(c, "deskewQuad")!.dragging).toBeNull();
+    // inside drag: all four corners follow the pointer delta
+    c.pointer(ev("down", [100, 70], [100, 70]));
+    quad = item(c, "deskewQuad")!;
+    expect(quad.moving).toBe(true);
+    expect(quad.dragging).toBeNull();
+    c.pointer(ev("move", [130, 90], [130, 90]));
+    quad = item(c, "deskewQuad")!;
+    expect(quad.corners).toEqual([
+      { x: 44, y: 50 }, { x: 200, y: 60 }, { x: 200, y: 120 }, { x: 80, y: 120 },
+    ]);
+    c.pointer(ev("up", [130, 90], [130, 90]));
+    // outside the quad: nothing grabs, nothing moves
+    c.pointer(ev("down", [5, 5], [5, 5]));
+    expect(item(c, "deskewQuad")!.moving).toBe(false);
+    expect(item(c, "deskewQuad")!.dragging).toBeNull();
+    c.pointer(ev("move", [40, 40], [40, 40]));
+    expect(item(c, "deskewQuad")!.corners).toEqual([
+      { x: 44, y: 50 }, { x: 200, y: 60 }, { x: 200, y: 120 }, { x: 80, y: 120 },
+    ]);
+  });
+
+  it("Enter before any drag is a gentle no-op and other keys pass through (AC11)", () => {
+    const c = start("deskew", mkImage());
+    expect(c.key("Enter")).toEqual([{ kind: "toast", message: "No changes — nothing to deskew" }]);
+    expect(c.tool()).toBe("deskew"); // stays
+    expect(item(c, "deskewQuad")!.corners).toEqual(initialQuad);
+    expect(c.key("Escape")).toEqual([]); // canvas cancel path handles Esc
+    expect(c.key("0")).toEqual([]);
+    expect(c.tool()).toBe("deskew");
+    // non-deskew tools never handle keys
+    const rotate = start("rotate", mkImage());
+    expect(rotate.key("Enter")).toEqual([]);
+  });
+
+  it("Enter after a real drag commits the perspective and exits (AC11)", () => {
+    const img = mkImage();
+    const c = start("deskew", img);
+    // pull the TL handle toward (60,30): quad stays convex and inside the photo
+    c.pointer(ev("down", [50, 40], [50, 40]));
+    c.pointer(ev("move", [60, 30], [60, 30]));
+    const intents = c.key("Enter");
+    expect(intents).toHaveLength(2);
+    const commit = intents[0];
+    if (commit.kind !== "commitDeskew") throw new Error("expected commitDeskew");
+    expect(commit.imageId).toBe("img-1");
+    const P = commit.perspective;
+    // the produced map must pass the store's own validation domain:
+    // finite, pole-free over the photo, corners mapped inside [0,w]x[0,h]
+    for (const [x, y] of [[0, 0], [200, 0], [200, 100], [0, 100]] as const) {
+      expect(1 + P.g * x + P.h * y).toBeGreaterThan(0);
+      const mapped = applyPerspective(P, { x, y });
+      expect(mapped.x).toBeGreaterThanOrEqual(-1e-6);
+      expect(mapped.x).toBeLessThanOrEqual(200 + 1e-6);
+      expect(mapped.y).toBeGreaterThanOrEqual(-1e-6);
+      expect(mapped.y).toBeLessThanOrEqual(100 + 1e-6);
+    }
+    // the dragged corners (back in source px) rectify onto an axis-aligned rect
+    const dragged = [{ x: 60, y: 30 }, { x: 170, y: 40 }, { x: 170, y: 100 }, { x: 50, y: 100 }];
+    const sourceQuad = dragged.map((p) => worldToSource(img, p));
+    const [tl, tr, br, bl] = sortQuadCorners(sourceQuad.map((p) => applyPerspective(P, p)));
+    expect(tl.y).toBeCloseTo(tr.y, 6);
+    expect(bl.y).toBeCloseTo(br.y, 6);
+    expect(tl.x).toBeCloseTo(bl.x, 6);
+    expect(tr.x).toBeCloseTo(br.x, 6);
+    expect(intents[1]).toEqual({ kind: "toast", message: "Deskewed" });
+    expect(c.tool()).toBeNull(); // exits after committing
+    expect(c.overlay()).toEqual([]);
+    expect(c.targetId()).toBeNull();
+  });
+
+  it("keeps the tool and the quad alive when the quad is invalid (AC12)", () => {
+    const c = start("deskew", mkImage());
+    // a corner dragged outside the photograph
+    c.pointer(ev("down", [50, 40], [50, 40]));
+    c.pointer(ev("move", [300, 250], [300, 250]));
+    expect(c.key("Enter")).toEqual([{ kind: "toast", message: "Deskew corners must stay inside the photograph" }]);
+    expect(c.tool()).toBe("deskew");
+    expect(item(c, "deskewQuad")!.corners[0]).toEqual({ x: 300, y: 250 }); // retained for fixing
+    // a non-convex (dart) quad, dragged handle by handle, in source-px terms
+    // (10,10),(190,10),(95,15),(10,90) → world (20,30),(200,30),(105,35),(20,110)
+    const c2 = start("deskew", mkImage());
+    const handles = [[50, 40], [170, 40], [170, 100], [50, 100]];
+    const targets = [[20, 30], [200, 30], [105, 35], [20, 110]];
+    handles.forEach(([hx, hy], i) => {
+      const [tx, ty] = targets[i];
+      c2.pointer(ev("down", [hx, hy], [hx, hy]));
+      c2.pointer(ev("move", [tx, ty], [tx, ty]));
+      c2.pointer(ev("up", [tx, ty], [tx, ty]));
+    });
+    expect(c2.key("Enter")).toEqual([{ kind: "toast", message: "Deskew corners must form a convex quadrilateral" }]);
+    expect(c2.tool()).toBe("deskew");
+    expect(item(c2, "deskewQuad")!.corners).toEqual([
+      { x: 20, y: 30 }, { x: 200, y: 30 }, { x: 105, y: 35 }, { x: 20, y: 110 },
+    ]);
+    // fixing the quad afterwards can still commit
+    c2.pointer(ev("down", [105, 35], [105, 35]));
+    c2.pointer(ev("move", [170, 100], [170, 100]));
+    c2.pointer(ev("up", [170, 100], [170, 100]));
+    const intents = c2.key("Enter");
+    expect(intents[0].kind).toBe("commitDeskew");
+    expect(intents[1]).toEqual({ kind: "toast", message: "Deskewed" });
+    expect(c2.tool()).toBeNull();
   });
 });

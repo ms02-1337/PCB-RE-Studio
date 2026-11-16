@@ -99,6 +99,63 @@ describe("updateImageTransform validation semantics", () => {
     expect(image.warp).toBeUndefined();
   });
 
+  it("stores valid perspectives and drops NaN, degenerate and pole maps (AC13)", () => {
+    const { actions, add } = fixture(); const image = add("Photo"); // 200x100
+    const mild = { a: 1.02, b: 0.001, c: 0.5, d: -0.001, e: 1.01, f: -0.25, g: 0.000001, h: 0.000002 };
+    actions.updateImageTransform(image.id, { perspective: mild });
+    expect(image.perspective).toEqual(mild);
+    // near-identity deletes the field (files keep the legacy shape)
+    actions.updateImageTransform(image.id, { perspective: { a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 0, h: 0 } });
+    expect(image.perspective).toBeUndefined();
+    // non-finite coefficients drop the key
+    for (const bad of [
+      { ...mild, a: Number.NaN },
+      { ...mild, g: Number.POSITIVE_INFINITY },
+      { ...mild, f: Number.NEGATIVE_INFINITY },
+    ]) {
+      actions.updateImageTransform(image.id, { perspective: bad });
+      expect(image.perspective).toBeUndefined();
+    }
+    // degenerate determinant drops the key
+    actions.updateImageTransform(image.id, { perspective: { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 } });
+    expect(image.perspective).toBeUndefined();
+    // a denominator pole over the photograph drops the key
+    // (h = -0.02 gives w = 1 - 2 at the bottom corners of the 100px image)
+    actions.updateImageTransform(image.id, { perspective: { ...mild, h: -0.02 } });
+    expect(image.perspective).toBeUndefined();
+    // a singular linear part drops the key even though the full 3x3 det is 1
+    // and no pole exists (invertPerspective would divide by a·e − b·d = 0)
+    actions.updateImageTransform(image.id, {
+      perspective: { a: 1, b: 2, c: 1, d: 2, e: 4, f: 1, g: 0, h: 1 },
+    });
+    expect(image.perspective).toBeUndefined();
+    // null resets a stored perspective without touching the other fields
+    actions.updateImageTransform(image.id, { rotation: 30, perspective: mild });
+    actions.updateImageTransform(image.id, { perspective: null });
+    expect(image.perspective).toBeUndefined();
+    expect(image.rotation).toBe(30);
+    // updateImage (the plain patch) never smuggles a perspective past validation
+    actions.updateImage(image.id, { perspective: mild } as never);
+    expect(image.perspective).toBeUndefined();
+  });
+
+  it("gains the perspective key only when a deskew is stored and honors locks (AC13, AC14)", () => {
+    const { actions, add } = fixture(); const image = add("Photo");
+    const mild = { a: 1.02, b: 0.001, c: 0.5, d: -0.001, e: 1.01, f: -0.25, g: 0.000001, h: 0.000002 };
+    // locked images ignore the whole patch
+    actions.updateImage(image.id, { locked: true });
+    actions.updateImageTransform(image.id, { perspective: mild });
+    expect(shape(image)).toEqual(LEGACY_IMAGE_KEYS);
+    actions.updateImage(image.id, { locked: false });
+    // the shape snapshot gains exactly one key, only for the deskewed case
+    actions.updateImageTransform(image.id, { rotation: 45, warp: { a: 2, b: 0, c: 0, d: 2 } });
+    expect(shape(image)).toEqual(["assetHash", "flipH", "flipV", "height", "id", "locked", "name", "opacity", "rotation", "visible", "warp", "width", "x", "y"]);
+    actions.updateImageTransform(image.id, { perspective: mild });
+    expect(shape(image)).toEqual(["assetHash", "flipH", "flipV", "height", "id", "locked", "name", "opacity", "perspective", "rotation", "visible", "warp", "width", "x", "y"]);
+    actions.updateImageTransform(image.id, { perspective: null });
+    expect(shape(image)).toEqual(["assetHash", "flipH", "flipV", "height", "id", "locked", "name", "opacity", "rotation", "visible", "warp", "width", "x", "y"]);
+  });
+
   it("calibrates the active PCB only for finite positive pxPerMm", () => {
     const { actions, add } = fixture(); add("Photo");
     const pcb = actions.activePcb()!;
@@ -194,5 +251,22 @@ describe("store-level transform commits", () => {
     await reopened.openProject("C:\\test.pcbre");
     expect(reopened.visual.activePcb()!.images[0]).toMatchObject({ rotation: 45.5, scaleX: 2, scaleY: 0.5, warp: { a: 1.1, b: 0.1, c: -0.05, d: 0.9 } });
     expect(reopened.visual.activePcb()!.pxPerMm).toBe(3.78);
+  });
+
+  it("commits a deskew perspective as one undo entry that restores exact JSON (AC13)", async () => {
+    const store = await setup();
+    const image = store.visual.activePcb()!.images[0];
+    const perspective = { a: 1.02, b: 0.001, c: 0.5, d: -0.001, e: 1.01, f: -0.25, g: 0.000001, h: 0.000002 };
+    expect(store.canUndo()).toBe(false);
+    store.visual.updateImageTransform(image.id, { perspective });
+    const after = JSON.stringify(store.visual.activePcb());
+    expect(store.visual.activePcb()!.images[0].perspective).toEqual(perspective);
+    store.undo();
+    expect(shape(store.visual.activePcb()!.images[0])).toEqual(LEGACY_IMAGE_KEYS);
+    store.redo();
+    expect(JSON.stringify(store.visual.activePcb())).toBe(after);
+    // a patch whose perspective drops mutates nothing and adds no entry
+    store.visual.updateImageTransform(image.id, { perspective: { a: Number.NaN, b: 0, c: 0, d: 0, e: 1, f: 0, g: 0, h: 0 } });
+    expect(store.visual.activePcb()!.images[0].perspective).toEqual(perspective);
   });
 });

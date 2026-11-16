@@ -37,11 +37,21 @@
 //              an axis is entered, that axis auto-calibrates (pxPerMm =
 //              span/mm, factor 1). Applied as warp' = diag(fx,fy) · warp about
 //              the image anchor (position unchanged).
+//  deskew    — four corner handles over the selected photo (a 20%-inset rect
+//              where the visible viewport overlaps the image footprint).
+//              Drag a handle to pull that corner, or drag inside the quad to
+//              translate all four. ENTER solves the perspective (quad corners
+//              → an axis-aligned rect fitted inside the photo bounds) and
+//              commits it as the image's non-destructive `perspective` field
+//              (straightened source px, applied innermost); a failed solve
+//              toasts the reason and keeps the quad for correction. ESC (the
+//              canvas cancel path) exits without committing.
 
 import type { CropRect, Point } from "../placement/projectDoc";
-import type { VisualImage, Warp2 } from "./model";
+import type { Perspective3, VisualImage, Warp2 } from "./model";
 import {
   composeWarpLeft,
+  deskewHomography,
   imageAnchor,
   imageLinear,
   levelLine,
@@ -56,7 +66,7 @@ import {
   worldToSource,
 } from "./transform";
 
-export type VisualToolId = "measure" | "calibrate" | "rotate" | "align" | "crop" | "resize";
+export type VisualToolId = "measure" | "calibrate" | "rotate" | "align" | "crop" | "resize" | "deskew";
 
 /** Document commits and UI prompts emitted by the controller. The caller
  * executes them: commits via store.visual actions (one mutate per commit),
@@ -69,6 +79,7 @@ export type ToolIntent =
   | { kind: "commitCrop"; imageId: string; crop: CropRect }
   | { kind: "commitAlign"; imageId: string; patch: { x: number; y: number; warp: Warp2 }; residualPx: number }
   | { kind: "commitResize"; imageId: string; warp: Warp2 }
+  | { kind: "commitDeskew"; imageId: string; perspective: Perspective3 }
   | { kind: "toast"; message: string };
 
 /** rotation: number sets (already normalized), null deletes the field;
@@ -98,7 +109,8 @@ export type VisualToolOverlay =
   | { kind: "rotateGizmo"; center: Point; knob: Point; /** World-space ring radius. */ radius: number; dragging: boolean; line?: { a: Point; b: Point; axis: "horizontal" | "vertical" } }
   | { kind: "alignMarkers"; points: Array<{ p: Point; index: number; phase: "moving" | "reference" }>; loupe: { at: Point } | null }
   | { kind: "cropPreview"; /** Kept-region footprint polygon (world space, ≥ 4 pts). */ polygon: Point[] }
-  | { kind: "resizeLine"; a: Point; b: Point; axis: "x" | "y"; step: 1 | 2 };
+  | { kind: "resizeLine"; a: Point; b: Point; axis: "x" | "y"; step: 1 | 2 }
+  | { kind: "deskewQuad"; corners: Point[]; /** Index of the corner being dragged, or null. */ dragging: number | null; /** True while the whole quad translates. */ moving: boolean };
 
 export interface VisualPointerEvent {
   phase: "down" | "move" | "up";
@@ -131,6 +143,10 @@ export interface VisualToolController {
   hover(world: Point): void;
   /** Modal reply for promptCalibrate / promptResizeAxis; null = skipped. */
   modalResult(value: number | null): ToolIntent[];
+  /** Keyboard for the active tool (deskew: Enter applies, Escape cancels via
+   * the canvas cancel path). Unhandled keys return [] so the canvas keeps
+   * its own shortcuts. Mirrors the CopperEditor key() precedent. */
+  key(key: string): ToolIntent[];
   /** Overlay items to draw this frame; empty when idle. */
   overlay(): VisualToolOverlay[];
 }
@@ -151,6 +167,11 @@ const CROP_MIN_SOURCE_PX = 1; // crop rect minimum per axis in source px
 const RESIZE_LINE_MIN_PX = 8; // resize reference line minimum screen span
 const RESIZE_NOOP_EPS = 1e-4; // both factors within this of 1 = no-op
 const ROTATION_EPS = 1e-9; // gizmo released without turning = no commit
+const CORNER_GRAB_PX = 14; // deskew: nearest-corner grab radius (screen px)
+/** Deskew Apply/Cancel pills, drawn top-center under the banner by overlays.
+ * v1 is visual + keyboard-operated (ENTER/ESC); pointer activation is not
+ * wired. Geometry is shared through these constants. */
+export const DESKEW_PILL = { width: 64, height: 22, gap: 8, top: 38 } as const;
 
 interface MeasureState {
   kind: "measure" | "calibrate";
@@ -196,7 +217,20 @@ interface ResizeState {
   awaiting: null | { axis: "x" | "y"; spanPx: number };
 }
 
-type ActiveTool = MeasureState | RotateState | AlignState | CropState | ResizeState;
+interface DeskewState {
+  kind: "deskew";
+  image: VisualImage;
+  /** Quad corners in WORLD px, TL,TR,BR,BL order. */
+  corners: Point[];
+  drag: null | {
+    corner: 0 | 1 | 2 | 3 | "inside";
+    startWorld: Point;
+    startCorners: Point[];
+  };
+  moved: boolean;
+}
+
+type ActiveTool = MeasureState | RotateState | AlignState | CropState | ResizeState | DeskewState;
 
 const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -572,6 +606,111 @@ export function createVisualToolController(): VisualToolController {
     return items;
   };
 
+  // ---- deskew ---------------------------------------------------------------
+
+  /** CSS-screen px → world px (exact inverse of toScreen, flips included). */
+  const toWorld = (p: Point): Point => {
+    const base = { x: view.flipX ? view.width - p.x : p.x, y: view.flipY ? view.height - p.y : p.y };
+    return { x: (base.x - view.offsetX) / view.scale, y: (base.y - view.offsetY) / view.scale };
+  };
+
+  /** Even-odd winding test for the (convex) quad: the point is inside when
+   * the cross product against every edge keeps one sign. */
+  const pointInQuad = (quad: Point[], p: Point): boolean => {
+    let sign = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = quad[i];
+      const b = quad[(i + 1) % 4];
+      const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+      if (Math.abs(cross) < 1e-9) continue; // on the edge counts as inside
+      const s = cross > 0 ? 1 : -1;
+      if (sign === 0) sign = s;
+      else if (s !== sign) return false;
+    }
+    return true;
+  };
+
+  /** Initial quad: a 20%-inset rect over the intersection of the visible
+   * world viewport with the image's world footprint, so the default quad
+   * always sits inside the photograph (the apply path validates that).
+   * Falls back to the inset footprint when the image is off-screen. */
+  const initialDeskewQuad = (image: VisualImage): Point[] => {
+    const box = worldAabb([image]);
+    const a = toWorld({ x: 0, y: 0 });
+    const b = toWorld({ x: view.width, y: view.height });
+    const left = Math.max(box.left, Math.min(a.x, b.x));
+    const right = Math.min(box.right, Math.max(a.x, b.x));
+    const top = Math.max(box.top, Math.min(a.y, b.y));
+    const bottom = Math.min(box.bottom, Math.max(a.y, b.y));
+    const base = left < right && top < bottom ? { left, top, right, bottom } : box;
+    const insetX = (base.right - base.left) * 0.2;
+    const insetY = (base.bottom - base.top) * 0.2;
+    const x0 = base.left + insetX, x1 = base.right - insetX;
+    const y0 = base.top + insetY, y1 = base.bottom - insetY;
+    return [
+      { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
+    ];
+  };
+
+  const deskewDown = (s: DeskewState, e: VisualPointerEvent): ToolIntent[] => {
+    let nearest = -1;
+    let nearestScreen = Infinity;
+    for (let i = 0; i < 4; i++) {
+      const screen = dist(s.corners[i], e.world) * view.scale; // world → screen px
+      if (screen <= CORNER_GRAB_PX && screen < nearestScreen) {
+        nearest = i;
+        nearestScreen = screen;
+      }
+    }
+    const corner = nearest >= 0 ? (nearest as 0 | 1 | 2 | 3) : pointInQuad(s.corners, e.world) ? "inside" : null;
+    if (corner === null) return [];
+    s.drag = { corner, startWorld: e.world, startCorners: s.corners.map((p) => ({ ...p })) };
+    return [];
+  };
+
+  const deskewMove = (s: DeskewState, e: VisualPointerEvent): ToolIntent[] => {
+    const drag = s.drag;
+    if (!drag) return [];
+    if (drag.corner === "inside") {
+      const dx = e.world.x - drag.startWorld.x;
+      const dy = e.world.y - drag.startWorld.y;
+      s.corners = drag.startCorners.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    } else {
+      s.corners[drag.corner] = { x: e.world.x, y: e.world.y };
+    }
+    s.moved = true;
+    return [];
+  };
+
+  const deskewUp = (s: DeskewState): ToolIntent[] => {
+    s.drag = null;
+    return [];
+  };
+
+  /** ENTER: solve and commit, or explain and stay. No movement yet is a
+   * gentle no-op; a failed homography keeps the quad on screen for fixing. */
+  const deskewApply = (s: DeskewState): ToolIntent[] => {
+    if (!s.moved) return [{ kind: "toast", message: "No changes — nothing to deskew" }];
+    const result = deskewHomography(s.image, s.corners);
+    if ("error" in result) return [{ kind: "toast", message: result.error }];
+    const intents: ToolIntent[] = [
+      { kind: "commitDeskew", imageId: s.image.id, perspective: result.perspective },
+      { kind: "toast", message: "Deskewed" },
+    ];
+    clear(); // done: exit the tool
+    return intents;
+  };
+
+  const deskewOverlay = (s: DeskewState): VisualToolOverlay[] => [
+    banner("DESKEW — drag the corner handles, or drag inside to move all; ENTER applies, ESC cancels"),
+    {
+      kind: "deskewQuad",
+      corners: s.corners,
+      dragging: typeof s.drag?.corner === "number" ? s.drag.corner : null,
+      moving: s.drag?.corner === "inside",
+    },
+  ];
+
   // ---- controller surface ---------------------------------------------------
 
   const controller: VisualToolController = {
@@ -601,6 +740,9 @@ export function createVisualToolController(): VisualToolController {
         case "resize":
           active = { kind: "resize", image: snapshot, pxPerMm, step: 1, fx: 1, fy: 1, line: null, drag: null, awaiting: null };
           break;
+        case "deskew":
+          active = { kind: "deskew", image: snapshot, corners: initialDeskewQuad(snapshot), drag: null, moved: false };
+          break;
       }
       return [];
     },
@@ -628,6 +770,8 @@ export function createVisualToolController(): VisualToolController {
           return e.phase === "down" ? cropDown(s, e) : e.phase === "move" ? cropMove(s, e) : cropUp(s, e);
         case "resize":
           return e.phase === "down" ? resizeDown(s, e) : e.phase === "move" ? resizeMove(s, e) : resizeUp(s, e);
+        case "deskew":
+          return e.phase === "down" ? deskewDown(s, e) : e.phase === "move" ? deskewMove(s, e) : deskewUp(s);
       }
     },
     hover: (world) => {
@@ -642,6 +786,12 @@ export function createVisualToolController(): VisualToolController {
       if (s.kind === "calibrate") return calibrateModal(s, value);
       if (s.kind === "resize") return resizeModal(s, value);
       return [];
+    },
+    key: (key) => {
+      const s = active;
+      if (!s) return [];
+      if (key === "Enter" && s.kind === "deskew") return deskewApply(s);
+      return []; // Escape cancels through the canvas's existing cancel path
     },
     overlay: () => {
       const s = active;
@@ -658,6 +808,8 @@ export function createVisualToolController(): VisualToolController {
           return cropOverlay(s);
         case "resize":
           return resizeOverlay(s);
+        case "deskew":
+          return deskewOverlay(s);
       }
     },
   };

@@ -1,7 +1,8 @@
 // Screen-space overlay rendering for the visual editor tools. Pure drawing:
 // consumes the controller's VisualToolOverlay descriptors plus the current
 // view (zoom/pan/flips) and paints banners, measure lines + labels, the
-// rotate gizmo, align badges + magnifier loupe, crop shading and resize tags.
+// rotate gizmo, align badges + magnifier loupe, crop shading, resize tags
+// and the deskew quad (handles + Apply/Cancel pills).
 // Everything draws in CSS-pixel space with ctx.setTransform(dpr, 0, 0, dpr,
 // 0, 0) applied by the caller; world→screen conversion (including view
 // flips) happens here through the same mapping the canvas uses for pointers,
@@ -11,7 +12,7 @@
 // device pixel ratio). All helpers tolerate a null context for jsdom tests.
 
 import type { Point } from "../placement/projectDoc";
-import type { OverlayView, VisualToolOverlay } from "./toolController";
+import { DESKEW_PILL, type OverlayView, type VisualToolOverlay } from "./toolController";
 
 // ---------------------------------------------------------------------------
 // View mapping — ONE pure module shared by the canvas and the overlays.
@@ -258,6 +259,28 @@ function drawItem(ctx: CanvasRenderingContext2D, item: VisualToolOverlay, view: 
       text(ctx, tag, mid.x, mid.y - 11, color, "center");
       return;
     }
+    case "deskewQuad": {
+      const quad = item.corners.map((p) => worldToScreen(view, p));
+      if (quad.length < 4) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(quad[0].x, quad[0].y);
+      for (const corner of quad.slice(1)) ctx.lineTo(corner.x, corner.y);
+      ctx.closePath();
+      ctx.strokeStyle = CROP_STROKE;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      for (let i = 0; i < 4; i++) drawCornerHandle(ctx, quad[i], item.dragging === i);
+      if (item.moving) {
+        const center = midpoint(midpoint(quad[0], quad[2]), midpoint(quad[1], quad[3]));
+        text(ctx, "move all", center.x, center.y, ACCENT, "center");
+      }
+      drawDeskewPills(ctx, view);
+      return;
+    }
   }
 }
 
@@ -308,6 +331,40 @@ function drawKnob(ctx: CanvasRenderingContext2D, knob: Point, dragging: boolean)
   ctx.moveTo(tip.x, tip.y);
   ctx.lineTo(tip.x - tangent.x * 4 + Math.cos(theta) * 2, tip.y - tangent.y * 4 + Math.sin(theta) * 2);
   ctx.stroke();
+  ctx.restore();
+}
+
+/** Grabbable deskew corner handle: a small disc like the rotate knob, lit
+ * while its corner is dragged. */
+function drawCornerHandle(ctx: CanvasRenderingContext2D, at: Point, dragging: boolean): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, 7, 0, Math.PI * 2);
+  ctx.fillStyle = dragging ? KNOB_DRAG : KNOB_IDLE;
+  ctx.fill();
+  ctx.strokeStyle = DARK;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Deskew Apply/Cancel pills at top-center (geometry from DESKEW_PILL).
+ * v1 is keyboard-operated (ENTER/ESC); the pills cue those keys. */
+function drawDeskewPills(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+  const { width, height, gap, top } = DESKEW_PILL;
+  const x0 = view.width / 2 - (width * 2 + gap) / 2;
+  const labels: Array<[string, string]> = [["Apply", ACCENT], ["Cancel", TONES.neutral]];
+  ctx.save();
+  for (const [index, [label, color]] of labels.entries()) {
+    const x = x0 + index * (width + gap);
+    pill(ctx, x, top, width, height, 11);
+    ctx.fillStyle = BANNER_BG;
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    text(ctx, label, x + width / 2, top + height / 2 + 0.5, color, "center");
+  }
   ctx.restore();
 }
 

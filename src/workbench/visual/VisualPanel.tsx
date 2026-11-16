@@ -19,10 +19,11 @@ const TOOLS: Array<{ id: VisualToolId; label: string; title: string }> = [
   { id: "align", label: "Align", title: "Align the photograph to reference points" },
   { id: "crop", label: "Crop", title: "Crop the photograph" },
   { id: "resize", label: "Resize", title: "Resize the photograph to real dimensions" },
+  { id: "deskew", label: "Deskew", title: "Straighten the photograph by dragging its 4 corner handles" },
 ];
 /** Tools that mutate image transforms: gated on the alignment lock and the
  * rewarp warning (AC24/AC25). */
-const TRANSFORM_TOOLS = new Set<VisualToolId>(["rotate", "align", "crop", "resize"]);
+const TRANSFORM_TOOLS = new Set<VisualToolId>(["rotate", "align", "crop", "resize", "deskew"]);
 
 export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
   const visual = props.store.visual;
@@ -67,7 +68,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
     if (!image) return;
     if (TRANSFORM_TOOLS.has(id)) {
       if (image.locked) return;
-      if (image.warp || visual.activePcb()?.images.some((entry) => entry.warp)) {
+      if (image.warp || image.perspective || visual.activePcb()?.images.some((entry) => entry.warp || entry.perspective)) {
         if (!window.confirm(`Transforming "${image.name}" may break existing alignments. Continue?`)) return;
       }
     }
@@ -131,7 +132,6 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
       <For each={TOOLS}>{(tool) =>
         <button ref={(element) => { toolButtons[tool.id] = element; }} aria-pressed={activeTool() === tool.id ? "true" : "false"} classList={{ "is-active": activeTool() === tool.id }} disabled={!toolState(tool).enabled} title={toolState(tool).title} onClick={() => activateTool(tool.id)}>{tool.label}</button>
       }</For>
-      <button disabled title="Deskew is not implemented yet">Deskew</button>
       <span class="ve-tool-separator" aria-hidden="true" />
       <button aria-label="Flip view horizontally" title="Flip view horizontally" aria-pressed={flipX() ? "true" : "false"} classList={{ "is-active": flipX() }} disabled={!visual.activePcb()} onClick={() => setFlipX(!flipX())}><ActionIcon name="Mirror horizontal" /></button>
       <button aria-label="Flip view vertically" title="Flip view vertically" aria-pressed={flipY() ? "true" : "false"} classList={{ "is-active": flipY() }} disabled={!visual.activePcb()} onClick={() => setFlipY(!flipY())}><ActionIcon name="Mirror vertical" /></button>

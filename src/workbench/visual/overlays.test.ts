@@ -119,6 +119,7 @@ const overlayItems: VisualToolOverlay[] = [
   { kind: "alignMarkers", points: [{ p: { x: 10, y: 10 }, index: 1, phase: "moving" }, { p: { x: 50, y: 50 }, index: 2, phase: "reference" }], loupe: { at: { x: 20, y: 20 } } },
   { kind: "cropPreview", polygon: [{ x: 5, y: 5 }, { x: 50, y: 5 }, { x: 50, y: 40 }, { x: 5, y: 40 }] },
   { kind: "resizeLine", a: { x: 0, y: 30 }, b: { x: 60, y: 30 }, axis: "x", step: 1 },
+  { kind: "deskewQuad", corners: [{ x: 10, y: 10 }, { x: 90, y: 14 }, { x: 86, y: 60 }, { x: 6, y: 55 }], dragging: 2, moving: false },
 ];
 
 describe("drawVisualOverlays", () => {
@@ -126,6 +127,16 @@ describe("drawVisualOverlays", () => {
     expect(() => drawVisualOverlays(fakeContext(true), overlayItems, view())).not.toThrow();
     expect(() => drawVisualOverlays(fakeContext(false), overlayItems, view())).not.toThrow();
     expect(() => drawVisualOverlays(fakeContext(true), overlayItems, view({ flipX: true, flipY: true }))).not.toThrow();
+  });
+  it("paints the deskew quad states: idle, dragged corner, inside-move, empty corners", () => {
+    const states: VisualToolOverlay[] = [
+      { kind: "deskewQuad", corners: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }], dragging: null, moving: false },
+      { kind: "deskewQuad", corners: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }], dragging: 0, moving: false },
+      { kind: "deskewQuad", corners: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }], dragging: null, moving: true },
+    ];
+    for (const deskew of states)
+      expect(() => drawVisualOverlays(fakeContext(true), [deskew], view())).not.toThrow();
+    expect(() => drawVisualOverlays(fakeContext(true), [{ kind: "deskewQuad", corners: [], dragging: null, moving: false }], view())).not.toThrow();
   });
   it("skips a loupe whose source region leaves the canvas", () => {
     const items: VisualToolOverlay[] = [

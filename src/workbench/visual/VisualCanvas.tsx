@@ -5,9 +5,14 @@ import { hitVisualImage, type VisualImage } from "./model";
 import type { PlacementStore } from "../placement/store";
 import type { Point } from "../placement/projectDoc";
 import { createVisualToolController, type OverlayView, type ToolIntent, type VisualToolId } from "./toolController";
-import { effectiveVisualTransform, imageAnchor, imageLinear, worldAabb, worldFootprint, worldToSource } from "./transform";
+import { affineFromTriangle, effectiveVisualTransform, imageAnchor, imageLinear, perspectiveMesh, worldAabb, worldFootprint, worldToSource } from "./transform";
 import { drawVisualOverlays, screenToBase, screenToWorld } from "./overlays";
 import type { CopperEditor } from "./CopperEditor";
+
+/** Seam overdraw: each clipped mesh triangle is inflated this many CSS px
+ * beyond its vertices (radially from the centroid) so adjacent triangles
+ * overlap instead of showing hairline seams from rasterizer rounding. */
+const SEAM_OVERDRAW_PX = 0.75;
 
 /** Prompt requests forwarded to the panel (which owns the value modal),
  * together with a reply seam back into the controller: a positive number
@@ -112,6 +117,7 @@ export function VisualCanvas(props: {
         case "commitCrop": props.store.visual.updateImageTransform(intent.imageId, { crop: intent.crop }); break;
         case "commitAlign": props.store.visual.updateImageTransform(intent.imageId, intent.patch); break;
         case "commitResize": props.store.visual.updateImageTransform(intent.imageId, { warp: intent.warp }); break;
+        case "commitDeskew": props.store.visual.updateImageTransform(intent.imageId, { perspective: intent.perspective }); break;
         case "commitCalibrate": props.store.visual.calibratePcb(intent.pxPerMm); break;
         case "toast": showToast(intent.message); break;
         case "promptCalibrate": props.onPrompt({ kind: "calibrate", spanPx: intent.spanPx }, reply); break;
@@ -120,6 +126,46 @@ export function VisualCanvas(props: {
     }
     if (props.tool && !controller.tool()) props.onToolEnd();
     redraw();
+  };
+  /** Perspective render path: the straightened photo is approximated by an
+   * affine per mesh triangle. Each triangle clips in WORLD space first (a
+   * clip is captured in device space, so the path must be built while the
+   * world transform is still active), is inflated radially by
+   * SEAM_OVERDRAW_PX / scale to hide seams, and only then applies the
+   * triangle's source→world affine and draws the full bitmap. */
+  const drawPerspectiveImage = (
+    ctx: CanvasRenderingContext2D,
+    bitmap: ImageBitmap,
+    shown: VisualImage,
+  ) => {
+    for (const tri of perspectiveMesh(shown)) {
+      const A = affineFromTriangle(tri.src, tri.world);
+      if (!A) continue;
+      const [p0, p1, p2] = tri.world;
+      const cx = (p0.x + p1.x + p2.x) / 3;
+      const cy = (p0.y + p1.y + p2.y) / 3;
+      const overdraw = SEAM_OVERDRAW_PX / Math.max(scale, 1e-6);
+      const push = (p: Point): Point => {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const len = Math.hypot(dx, dy) || 1;
+        const k = (len + overdraw) / len;
+        return { x: cx + dx * k, y: cy + dy * k };
+      };
+      const a = push(p0);
+      const b = push(p1);
+      const c = push(p2);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
+      ctx.clip();
+      ctx.transform(A.a, A.b, A.c, A.d, A.e, A.f);
+      ctx.drawImage(bitmap, 0, 0);
+      ctx.restore();
+    }
   };
   function draw() {
     frame = 0;
@@ -139,13 +185,19 @@ export function VisualCanvas(props: {
       if (!image.visible || opacity(image) === 0) continue;
       const bitmap = cache.get(image.assetHash); if (!bitmap) continue;
       const shown = displayed(image);
-      const anchor = imageAnchor(shown);
-      const linear = imageLinear(shown);
-      const crop = effectiveVisualTransform(shown).crop;
-      ctx.save(); ctx.globalAlpha = opacity(image);
-      ctx.translate(anchor.x, anchor.y);
-      ctx.transform(linear.a, linear.b, linear.c, linear.d, 0, 0);
-      ctx.drawImage(bitmap, crop.x, crop.y, crop.w, crop.h, -crop.w / 2, -crop.h / 2, crop.w, crop.h);
+      ctx.save();
+      ctx.globalAlpha = opacity(image);
+      if (shown.perspective) {
+        // Deskewed: per-triangle affine mesh over the crop rect.
+        drawPerspectiveImage(ctx, bitmap, shown);
+      } else {
+        const anchor = imageAnchor(shown);
+        const linear = imageLinear(shown);
+        const crop = effectiveVisualTransform(shown).crop;
+        ctx.translate(anchor.x, anchor.y);
+        ctx.transform(linear.a, linear.b, linear.c, linear.d, 0, 0);
+        ctx.drawImage(bitmap, crop.x, crop.y, crop.w, crop.h, -crop.w / 2, -crop.h / 2, crop.w, crop.h);
+      }
       ctx.restore();
       if (props.selected === image.id) {
         const footprint = worldFootprint(shown);
@@ -362,6 +414,18 @@ export function VisualCanvas(props: {
       onKeyDown={(e) => {
         if (!controller.tool() && props.components?.key(e.key)) { e.preventDefault(); redraw(); return; }
         if (!controller.tool() && props.copper?.key(e.key)) { e.preventDefault(); redraw(); return; }
+        // Active-tool keys (deskew: ENTER applies). Escape deliberately
+        // returns [] so the existing cancel branch below stays the single
+        // exit path for every tool.
+        if (controller.tool()) {
+          const intents = controller.key(e.key);
+          if (intents.length) {
+            e.preventDefault();
+            execute(intents);
+            redraw();
+            return;
+          }
+        }
         if (e.key === "Escape") {
           if (controller.tool()) { e.preventDefault(); execute(controller.cancel()); return; }
           end(false); props.select(null);

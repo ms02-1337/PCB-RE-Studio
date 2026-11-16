@@ -91,7 +91,7 @@ it("shows the tool toolbar with gated enablement and independent PCB tabs", () =
 it("enables tools only for a selection, gates transforms on lock and toggles aria-pressed", () => {
   store.visual.addImage(store.visual.activePcb()!.id, asset, "Front", 100, 80);
   render(() => <VisualPanel store={store} active />);
-  const toolButtons = ["Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize"].map((name) => screen.getByRole("button", { name }));
+  const toolButtons = ["Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew"].map((name) => screen.getByRole("button", { name }));
   // Measure is always available, even with nothing selected.
   expect(toolButtons[0].hasAttribute("disabled")).toBe(false);
   for (const button of toolButtons.slice(1)) expect(button.hasAttribute("disabled")).toBe(true);
@@ -103,10 +103,9 @@ it("enables tools only for a selection, gates transforms on lock and toggles ari
   fireEvent.click(measure);
   expect(measure.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(screen.getByRole("button", { name: "Lock Front" }));
-  for (const name of ["Rotate", "Align", "Crop", "Resize"]) expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
+  for (const name of ["Rotate", "Align", "Crop", "Resize", "Deskew"]) expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
   for (const name of ["Measure", "Calibrate"]) expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(false);
-  expect(screen.getByRole("button", { name: "Deskew" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByRole("button", { name: "Deskew" }).title).toBe("Deskew is not implemented yet");
+  expect(screen.getByRole("button", { name: "Deskew" }).title).toBe("Deskew: unlock the photograph first");
 });
 it("flips the view without marking the project dirty and resets on scene change", () => {
   store.visual.addImage(store.visual.activePcb()!.id, asset, "Front", 100, 80);
@@ -242,6 +241,60 @@ it("warns when any sibling photograph carries a warp", () => {
   fireEvent.click(crop);
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(crop.getAttribute("aria-pressed")).toBe("false");
+});
+
+/** AC18: Deskew behaves like the other transform tools — gated on an
+ * unlocked photograph selection, toggled via aria-pressed, and guarded by
+ * the rewarp confirmation when the selected photograph or any sibling
+ * carries a warp or perspective. */
+it("gates Deskew on an unlocked photograph and warns before re-warping", () => {
+  store.visual.addImage(store.visual.activePcb()!.id, asset, "Front", 100, 80);
+  store.visual.addImage(store.visual.activePcb()!.id, asset, "Back", 100, 80);
+  render(() => <VisualPanel store={store} active />);
+  const deskew = screen.getByRole("button", { name: "Deskew" });
+  // No photograph selected: disabled with a select-first hint.
+  expect(deskew.hasAttribute("disabled")).toBe(true);
+  expect(deskew.title).toBe("Deskew: select a photograph first");
+  fireEvent.click(screen.getByRole("button", { name: "Front" }));
+  expect(deskew.hasAttribute("disabled")).toBe(false);
+  expect(deskew.title).toBe("Straighten the photograph by dragging its 4 corner handles");
+  // Tool activation toggles aria-pressed like the other photograph tools.
+  fireEvent.click(deskew);
+  expect(deskew.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(deskew);
+  expect(deskew.getAttribute("aria-pressed")).toBe("false");
+  // A locked selection disables the tool with an unlock hint.
+  store.visual.updateImage(store.visual.activePcb()!.images[0].id, { locked: true });
+  expect(deskew.hasAttribute("disabled")).toBe(true);
+  expect(deskew.title).toBe("Deskew: unlock the photograph first");
+  store.visual.updateImage(store.visual.activePcb()!.images[0].id, { locked: false });
+  // A perspective on the selected photograph itself prompts; declining keeps
+  // the tool off, accepting activates it.
+  store.visual.updateImageTransform(store.visual.activePcb()!.images[0].id, {
+    perspective: { a: 1.02, b: 0.001, c: 0.5, d: -0.001, e: 1.01, f: -0.25, g: 0.000001, h: 0.000002 },
+  });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  fireEvent.click(deskew);
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(confirm.mock.calls[0][0]).toContain("Front");
+  expect(deskew.getAttribute("aria-pressed")).toBe("false");
+  confirm.mockReturnValue(true);
+  fireEvent.click(deskew);
+  expect(deskew.getAttribute("aria-pressed")).toBe("true");
+  // Toggling off again is free (no new confirmation); a clean selection with
+  // only a SIBLING perspective still warns before starting.
+  fireEvent.click(deskew);
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect(deskew.getAttribute("aria-pressed")).toBe("false");
+  store.visual.updateImageTransform(store.visual.activePcb()!.images[0].id, { perspective: null });
+  // Only the sibling carries a perspective now: the warning still applies.
+  store.visual.updateImageTransform(store.visual.activePcb()!.images[1].id, {
+    perspective: { a: 1.02, b: 0.001, c: 0.5, d: -0.001, e: 1.01, f: -0.25, g: 0.000001, h: 0.000002 },
+  });
+  confirm.mockReturnValue(false);
+  fireEvent.click(deskew);
+  expect(confirm).toHaveBeenCalledTimes(3);
+  expect(deskew.getAttribute("aria-pressed")).toBe("false");
 });
 
 describe("ValuePromptModal contract", () => {

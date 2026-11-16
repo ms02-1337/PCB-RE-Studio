@@ -1,4 +1,5 @@
-﻿import type { VisualEditor, VisualImage, VisualPcb, Warp2 } from "./model";
+﻿import { isInvertiblePerspective } from "./transform";
+import type { Perspective3, VisualEditor, VisualImage, VisualPcb, Warp2 } from "./model";
 import { initialVisualEditor, makeVisualImage, newVisualPcb, resizeLayers } from "./model";
 import type { AssetInfo, CropRect, ProjectDoc } from "../placement/projectDoc";
 import { layerResizePlan, mergeNets } from "./copper";
@@ -12,6 +13,7 @@ export interface VisualTransformPatch {
   scaleX?: number | null;
   scaleY?: number | null;
   warp?: Warp2 | null;
+  perspective?: Perspective3 | null;
   x?: number;
   y?: number;
 }
@@ -63,6 +65,38 @@ function cleanWarp(warp: Warp2 | null): Warp2 | null | undefined {
   return identity ? null : { a, b, c, d };
 }
 
+/** Validated perspective (Deskew map), mirroring cleanWarp: null resets;
+ * ≈ identity deletes; non-finite coefficients, |det| ≤ 1e-9, or a
+ * denominator pole over the photograph (w = 1 + g·x + h·y must stay
+ * > 1e-9 at the four image corners) drop the key. */
+function cleanPerspective(
+  perspective: Perspective3 | null,
+  image: VisualImage,
+): Perspective3 | null | undefined {
+  if (perspective === null) return null;
+  const { a, b, c, d, e, f, g, h } = perspective;
+  if (![a, b, c, d, e, f, g, h].every(Number.isFinite)) return undefined;
+  const det = a * (e - f * h) - b * (d - f * g) + c * (d * h - e * g);
+  if (Math.abs(det) <= WARP_DET_MIN) return undefined;
+  // invertPerspective divides by the linear part's determinant; a projective
+  // map can be invertible as a 3x3 yet have that part singular (numerators
+  // collapse onto a line) — reject it too (isInvertiblePerspective).
+  if (!isInvertiblePerspective(perspective)) return undefined;
+  const corners: Array<[number, number]> = [
+    [0, 0],
+    [image.width, 0],
+    [image.width, image.height],
+    [0, image.height],
+  ];
+  for (const [x, y] of corners)
+    if (!(1 + g * x + h * y > WARP_DET_MIN)) return undefined;
+  const identity =
+    Math.abs(a - 1) < 1e-12 &&
+    Math.abs(e - 1) < 1e-12 &&
+    [b, c, d, f, g, h].every((value) => Math.abs(value) < 1e-12);
+  return identity ? null : { a, b, c, d, e, f, g, h };
+}
+
 export function createVisualActions(doc: () => ProjectDoc | null, mutate: (change: (draft: ProjectDoc) => void) => void) {
   const synchronizeMarkings = (draft:ProjectDoc) => { for(const pcb of draft.visualEditor?.pcbs??[])for(const c of pcb.components??[]){if(!c.markingId)continue;const m=draft.components.find(m=>m.id===c.markingId);if(!m){delete c.markingId;continue;}m.refdes=c.reference;m.value=c.value;m.partNumber=c.partName;} };
   const editor = () => doc()?.visualEditor;
@@ -94,8 +128,8 @@ export function createVisualActions(doc: () => ProjectDoc | null, mutate: (chang
     updateImage: (id: string, patch: Partial<Omit<VisualImage, "id" | "assetHash" | "width" | "height">>) => editPcb((pcb) => {
       const image = pcb.images.find((entry) => entry.id === id);
       if (!image) return;
-      const { x, y, flipH, flipV, crop, rotation, scaleX, scaleY, warp, ...view } = patch;
-      void crop; void rotation; void scaleX; void scaleY; void warp; // transforms only via updateImageTransform
+      const { x, y, flipH, flipV, crop, rotation, scaleX, scaleY, warp, perspective, ...view } = patch;
+      void crop; void rotation; void scaleX; void scaleY; void warp; void perspective; // transforms only via updateImageTransform
       if (view.name !== undefined && !view.name.trim()) delete view.name;
       if (view.opacity !== undefined && (!Number.isFinite(view.opacity) || view.opacity < 0 || view.opacity > 1)) delete view.opacity;
       if (view.layerId !== undefined && view.layerId !== "" && !pcb.layers.includes(view.layerId)) delete view.layerId;
@@ -120,13 +154,15 @@ export function createVisualActions(doc: () => ProjectDoc | null, mutate: (chang
       const scaleX = patch.scaleX !== undefined ? cleanScale(patch.scaleX) : undefined;
       const scaleY = patch.scaleY !== undefined ? cleanScale(patch.scaleY) : undefined;
       const warp = patch.warp !== undefined ? cleanWarp(patch.warp) : undefined;
+      const perspective = patch.perspective !== undefined ? cleanPerspective(patch.perspective, image) : undefined;
       if (crop === undefined && rotation === undefined && scaleX === undefined && scaleY === undefined && warp === undefined
-        && patch.x === undefined && patch.y === undefined) return;
+        && perspective === undefined && patch.x === undefined && patch.y === undefined) return;
       if (crop !== undefined) { if (crop === null) delete image.crop; else image.crop = crop; }
       if (rotation !== undefined) { if (rotation === null) delete image.rotation; else image.rotation = rotation; }
       if (scaleX !== undefined) { if (scaleX === null) delete image.scaleX; else image.scaleX = scaleX; }
       if (scaleY !== undefined) { if (scaleY === null) delete image.scaleY; else image.scaleY = scaleY; }
       if (warp !== undefined) { if (warp === null) delete image.warp; else image.warp = warp; }
+      if (perspective !== undefined) { if (perspective === null) delete image.perspective; else image.perspective = perspective; }
       if (patch.x !== undefined && Number.isFinite(patch.x)) image.x = patch.x;
       if (patch.y !== undefined && Number.isFinite(patch.y)) image.y = patch.y;
     }),

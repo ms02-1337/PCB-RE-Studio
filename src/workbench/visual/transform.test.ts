@@ -1,8 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Point } from "../placement/projectDoc";
-import type { VisualImage, Warp2 } from "./model";
+import type { Perspective3, VisualImage, Warp2 } from "./model";
 import {
+  affineFromTriangle,
+  applyPerspective,
+  deskewDstRect,
+  deskewHomography,
+  invertPerspective,
+  isConvexQuad,
+  isInvertiblePerspective,
   composeWarpLeft,
   effectiveVisualTransform,
   imageAnchor,
@@ -10,9 +17,12 @@ import {
   levelLine,
   maxResidualPx,
   normalizeRotation,
+  perspectiveMesh,
   rotationMatrix,
   snap15,
   solveAffine,
+  solvePerspective,
+  sortQuadCorners,
   sourceToWorld,
   visualCropRect,
   worldAabb,
@@ -256,5 +266,253 @@ describe("normalizeRotation / snap15 / levelLine (AC10)", () => {
       expect(["horizontal", "vertical"]).toContain(level.axis);
     }
     expect(levelLine({ x: 5, y: 5 }, { x: 5, y: 5 })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Perspective (Deskew) — AC1 is the suite above passing UNEDITED: every
+// legacy image leaves the pipeline bit-identical.
+// ---------------------------------------------------------------------------
+
+/** A mild but visible projective map (no pole over a 200x100 photo:
+ * w = 1 + 3e-5·x − 2e-5·y stays in [0.998, 1.006]). */
+const mildP: Perspective3 = { a: 1.02, b: 0.011, c: 2.5, d: -0.008, e: 0.99, f: -1.25, g: 3e-5, h: -2e-5 };
+
+const apply = (P: Perspective3, p: Point): Point => applyPerspective(P, p);
+
+describe("perspective evaluation and inversion (AC2, AC3)", () => {
+  const src = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }];
+
+  it("solves the 8x8 projective system exactly and rejects degenerate input", () => {
+    const H: Perspective3 = { a: 1.05, b: 0.02, c: 3, d: -0.01, e: 0.97, f: -2, g: 2e-5, h: -1e-5 };
+    const dst = src.map((p) => apply(H, p));
+    const solved = solvePerspective(src, dst)!;
+    expect(solved).not.toBeNull();
+    for (const k of ["a", "b", "c", "d", "e", "f", "g", "h"] as const)
+      expect(Math.abs(solved[k] - H[k]), `coefficient ${k}`).toBeLessThan(1e-6);
+    const residual = Math.max(...src.map((p, i) => {
+      const got = apply(solved, p);
+      return Math.hypot(got.x - dst[i].x, got.y - dst[i].y);
+    }));
+    expect(residual).toBeLessThan(1e-6);
+    // collinear or duplicated source points cannot define a homography
+    const line = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }, { x: 30, y: 0 }];
+    expect(solvePerspective(line, line.map((p) => ({ x: p.x, y: p.y + 5 })))).toBeNull();
+    expect(solvePerspective([src[0], src[0], src[2], src[3]], dst)).toBeNull();
+    expect(solvePerspective(src.slice(0, 3), dst)).toBeNull();
+    expect(solvePerspective(src, dst.slice(0, 3))).toBeNull();
+    expect(solvePerspective([{ x: Number.NaN, y: 0 }, ...src.slice(1)], dst)).toBeNull();
+  });
+
+  it("inverts exactly: P⁻¹∘P is the identity over the image rect", () => {
+    const Pinv = invertPerspective(mildP);
+    for (const p of [...src, { x: 100, y: 50 }, { x: 37.5, y: 82.25 }]) {
+      const back = apply(Pinv, apply(mildP, p));
+      expect(Math.abs(back.x - p.x), `${p.x},${p.y}`).toBeLessThan(1e-9 * Math.max(1, Math.abs(p.x)));
+      expect(Math.abs(back.y - p.y), `${p.x},${p.y}`).toBeLessThan(1e-9 * Math.max(1, Math.abs(p.y)));
+    }
+    // involution: inverting twice restores the original map
+    const again = invertPerspective(Pinv);
+    for (const k of ["a", "b", "c", "d", "e", "f", "g", "h"] as const)
+      expect(again[k]).toBeCloseTo(mildP[k], 9);
+  });
+
+  it("flags a singular linear part even when the full 3x3 map is invertible", () => {
+    // Full det = 1 (rows a,b,c / d,e,f / g,h,1: 1·(4−1) − 2·(2−0) + 1·(2−0))
+    // and no pole (w = 1 + y > 0), yet a·e − b·d = 0: every numerator lies
+    // on a line, so the adjugate inverse would divide by zero and NaN the
+    // world↔source round-trip. Validation must reject exactly this shape.
+    const singular: Perspective3 = { a: 1, b: 2, c: 1, d: 2, e: 4, f: 1, g: 0, h: 1 };
+    expect(isInvertiblePerspective(singular)).toBe(false);
+    expect(isInvertiblePerspective(mildP)).toBe(true);
+    expect(isInvertiblePerspective({ a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 1e-6, h: 0 })).toBe(true);
+    expect(isInvertiblePerspective({ a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 })).toBe(false);
+  });
+});
+
+describe("pipeline composition with a perspective (AC4, AC5)", () => {
+  const stacked = image({
+    perspective: mildP,
+    crop: { x: 20, y: 10, w: 120, h: 60 },
+    rotation: 15,
+    flipH: true,
+    scaleX: 1.4,
+    warp: { a: 1.1, b: 0.05, c: -0.05, d: 0.95 },
+  });
+
+  it("applies P innermost: sourceToWorld(p) == legacyAffine(P(p))", () => {
+    const r = visualCropRect(stacked);
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    const L = imageLinear(stacked);
+    const t = imageAnchor(stacked);
+    for (const p of [{ x: 0, y: 0 }, { x: 200, y: 100 }, { x: 100, y: 50 }, { x: 33, y: 71 }]) {
+      const q = apply(mildP, p);
+      const legacy = { x: L.a * (q.x - cx) + L.c * (q.y - cy) + t.x, y: L.b * (q.x - cx) + L.d * (q.y - cy) + t.y };
+      const got = sourceToWorld(stacked, p);
+      expect(got.x).toBeCloseTo(legacy.x, 9);
+      expect(got.y).toBeCloseTo(legacy.y, 9);
+    }
+    // the same image without the field applies the affine directly, so
+    // pre-straightening the input reproduces the full pipeline exactly
+    const without = { ...stacked, perspective: undefined };
+    expect(sourceToWorld(without, apply(mildP, { x: 100, y: 50 }))).toEqual(sourceToWorld(stacked, { x: 100, y: 50 }));
+  });
+
+  it("round-trips world↔source through P⁻¹ and keeps original-px semantics", () => {
+    const combos: VisualImage[] = [
+      image({ perspective: mildP }),
+      image({ crop: { x: 20, y: 10, w: 120, h: 60 }, perspective: mildP }),
+      image({ rotation: 37.2, flipH: true, scaleX: 1.7, perspective: mildP }),
+      image({ warp: { a: 1.1, b: 0.15, c: -0.1, d: 0.95 }, perspective: mildP }),
+    ];
+    for (const img of combos) {
+      for (const p of [{ x: -40, y: -30 }, { x: 0, y: 0 }, { x: 100, y: 50 }, { x: 200, y: 100 }, { x: 250, y: 130 }]) {
+        const back = worldToSource(img, sourceToWorld(img, p));
+        expect(Math.abs(back.x - p.x), `${img.rotation} @ ${p.x},${p.y}`).toBeLessThan(1e-6);
+        expect(Math.abs(back.y - p.y), `${img.rotation} @ ${p.x},${p.y}`).toBeLessThan(1e-6);
+      }
+    }
+    // the footprint still traces the crop corners (now through P), and the
+    // AABB follows the straightened shape
+    const plain = image({ perspective: mildP });
+    const foot = worldFootprint(plain);
+    expect(foot.length).toBe(4);
+    for (let i = 0; i < 4; i++) {
+      const corner = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }][i];
+      const w = worldFootprint(plain)[i];
+      const direct = sourceToWorld(plain, corner);
+      expect(w.x).toBeCloseTo(direct.x, 9);
+      expect(w.y).toBeCloseTo(direct.y, 9);
+    }
+    expect(worldAabb([plain])).toEqual({
+      left: Math.min(...foot.map((p) => p.x)), right: Math.max(...foot.map((p) => p.x)),
+      top: Math.min(...foot.map((p) => p.y)), bottom: Math.max(...foot.map((p) => p.y)),
+    });
+  });
+});
+
+describe("quad helpers (AC6)", () => {
+  const rect = [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 100, y: 50 }, { x: 10, y: 50 }];
+
+  it("orders shuffled corners into TL,TR,BR,BL (ties by x)", () => {
+    const shuffles = [
+      [rect[2], rect[0], rect[3], rect[1]],
+      [rect[1], rect[3], rect[0], rect[2]],
+      [rect[3], rect[2], rect[1], rect[0]],
+    ];
+    for (const shuffle of shuffles)
+      expect(sortQuadCorners(shuffle)).toEqual([rect[0], rect[1], rect[2], rect[3]]);
+    expect(sortQuadCorners([{ x: 80, y: 0 }, { x: 20, y: 0 }, { x: 100, y: 60 }, { x: 0, y: 50 }]))
+      .toEqual([{ x: 20, y: 0 }, { x: 80, y: 0 }, { x: 100, y: 60 }, { x: 0, y: 50 }]);
+  });
+
+  it("accepts strictly convex quads and rejects bowties and collinear corners", () => {
+    expect(isConvexQuad(rect)).toBe(true);
+    expect(isConvexQuad([{ x: 10, y: 10 }, { x: 60, y: 5 }, { x: 100, y: 40 }, { x: 30, y: 60 }])).toBe(true);
+    expect(isConvexQuad([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 10, y: 0 }])).toBe(false);
+    expect(isConvexQuad([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }, { x: 10, y: 10 }])).toBe(false);
+    expect(isConvexQuad([{ x: 10, y: 10 }, { x: 190, y: 10 }, { x: 95, y: 15 }, { x: 10, y: 90 }])).toBe(false);
+    expect(isConvexQuad(rect.slice(0, 3))).toBe(false);
+  });
+
+  it("builds the destination rect from averaged opposite edges about the centroid", () => {
+    const quad = [{ x: 0, y: 0 }, { x: 100, y: 10 }, { x: 110, y: 60 }, { x: 10, y: 50 }];
+    const dst = deskewDstRect(quad);
+    const w = Math.sqrt(10100) / 2, h = Math.sqrt(2600) / 2;
+    expect(dst).toEqual([
+      { x: 55 - w, y: 30 - h }, { x: 55 + w, y: 30 - h }, { x: 55 + w, y: 30 + h }, { x: 55 - w, y: 30 + h },
+    ]);
+  });
+});
+
+describe("deskewHomography (AC7)", () => {
+  /** A slightly skewed convex quad fully inside the 200x100 photo. */
+  const sourceQuad = [{ x: 50, y: 25 }, { x: 150, y: 20 }, { x: 155, y: 80 }, { x: 45, y: 75 }];
+  const worldQuad = sourceQuad.map((p) => sourceToWorld(image(), p));
+
+  it("returns a fitted, pole-free, centered perspective on success", () => {
+    const result = deskewHomography(image(), worldQuad);
+    if (!("perspective" in result)) throw new Error(`unexpected error: ${result.error}`);
+    const P = result.perspective;
+    // photo corners map inside [0,w]x[0,h], bbox centered by the 0.98 fit
+    const mapped = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }].map((p) => apply(P, p));
+    for (const q of mapped) {
+      expect(q.x).toBeGreaterThanOrEqual(-1e-6);
+      expect(q.x).toBeLessThanOrEqual(200 + 1e-6);
+      expect(q.y).toBeGreaterThanOrEqual(-1e-6);
+      expect(q.y).toBeLessThanOrEqual(100 + 1e-6);
+    }
+    const bx = Math.min(...mapped.map((q) => q.x)), by = Math.min(...mapped.map((q) => q.y));
+    const bw = Math.max(...mapped.map((q) => q.x)) - bx, bh = Math.max(...mapped.map((q) => q.y)) - by;
+    expect(bx + bw / 2).toBeCloseTo(100, 6);
+    expect(by + bh / 2).toBeCloseTo(50, 6);
+    expect(bw).toBeLessThanOrEqual(200);
+    expect(bh).toBeLessThanOrEqual(100);
+    // the map stays pole-free over the photograph
+    for (const [x, y] of [[0, 0], [200, 0], [200, 100], [0, 100]])
+      expect(1 + P.g * x + P.h * y).toBeGreaterThan(0);
+    // the clicked corners rectify onto an axis-aligned rectangle (scaled dst)
+    const rectified = sortQuadCorners(sourceQuad.map((p) => apply(P, p)));
+    const [tl, tr, br, bl] = rectified;
+    expect(tl.y).toBeCloseTo(tr.y, 6);
+    expect(br.y).toBeCloseTo(bl.y, 6);
+    expect(tl.x).toBeCloseTo(bl.x, 6);
+    expect(tr.x).toBeCloseTo(br.x, 6);
+    // and the store accepts the produced value
+    expect(Number.isFinite(P.a + P.b + P.c + P.d + P.e + P.f + P.g + P.h)).toBe(true);
+  });
+
+  it("explains every failure distinctly and the strings are user-facing", () => {
+    const img = image();
+    const toWorld = (quad: Point[]) => quad.map((p) => sourceToWorld(img, p));
+    // corner dragged past the photo edge (source x 250 > 200 + 1 tolerance)
+    const outside = deskewHomography(img, toWorld([{ x: 250, y: 50 }, { x: 150, y: 20 }, { x: 155, y: 80 }, { x: 45, y: 75 }]));
+    if (!("error" in outside)) throw new Error("expected an error");
+    // a dart (BR pulled inside the triangle) sorts to a non-convex quad
+    const nonConvex = deskewHomography(img, toWorld([{ x: 10, y: 10 }, { x: 190, y: 10 }, { x: 95, y: 15 }, { x: 10, y: 90 }]));
+    if (!("error" in nonConvex)) throw new Error("expected an error");
+    expect(outside.error).not.toBe(nonConvex.error);
+    expect(outside.error).toContain("inside the photograph");
+    expect(nonConvex.error).toContain("convex");
+    // the collinear/degenerate solve is guarded upstream by solvePerspective
+    const line = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }, { x: 30, y: 0 }];
+    expect(solvePerspective(line, line)).toBeNull();
+  });
+});
+
+describe("affineFromTriangle and perspectiveMesh (AC8)", () => {
+  it("solves the exact affine through 3 pairs and rejects zero area", () => {
+    const A = affineFromTriangle([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }], [{ x: 2, y: 3 }, { x: 4, y: 3 }, { x: 2, y: 7 }]);
+    expect(A).toEqual({ a: 2, b: 0, c: 0, d: 4, e: 2, f: 3 });
+    const shear = affineFromTriangle([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }], [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 1 }]);
+    expect(shear).toEqual({ a: 1, b: 0, c: 2, d: 1, e: 0, f: 0 });
+    expect(affineFromTriangle([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }], [{ x: 0, y: 0 }, { x: 5, y: 1 }, { x: 10, y: 2 }])).toBeNull();
+    expect(affineFromTriangle([], [])).toBeNull();
+  });
+
+  it("tiles the crop rect and reproduces the pipeline per triangle", () => {
+    const img = image({ crop: { x: 20, y: 10, w: 120, h: 60 }, perspective: mildP, rotation: 15 });
+    const mesh = perspectiveMesh(img, 4);
+    expect(mesh).toHaveLength(4 * 4 * 2);
+    expect(mesh[0].src).toEqual([{ x: 20, y: 10 }, { x: 50, y: 10 }, { x: 20, y: 25 }]);
+    expect(mesh[1].src).toEqual([{ x: 50, y: 10 }, { x: 50, y: 25 }, { x: 20, y: 25 }]); // shared diagonal
+    for (const tri of mesh)
+      for (let k = 0; k < 3; k++) {
+        const w = sourceToWorld(img, tri.src[k]);
+        expect(tri.world[k].x).toBeCloseTo(w.x, 9);
+        expect(tri.world[k].y).toBeCloseTo(w.y, 9);
+      }
+    // each triangle's affine reproduces all 3 vertex pairs (≤ 1e-6)
+    for (const tri of mesh) {
+      const A = affineFromTriangle(tri.src, tri.world)!;
+      expect(A).not.toBeNull();
+      for (let k = 0; k < 3; k++) {
+        const p = tri.src[k];
+        expect(A.a * p.x + A.c * p.y + A.e).toBeCloseTo(tri.world[k].x, 6);
+        expect(A.b * p.x + A.d * p.y + A.f).toBeCloseTo(tri.world[k].y, 6);
+      }
+    }
+    expect(perspectiveMesh(img, 0)).toEqual([]);
+    expect(perspectiveMesh(image(), 2)).toHaveLength(8);
   });
 });
