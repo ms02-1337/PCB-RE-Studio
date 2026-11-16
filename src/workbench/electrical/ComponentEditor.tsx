@@ -1,5 +1,5 @@
 import { electricalMembers } from "./actions";
-import { createSignal, createEffect, For, Show } from "solid-js";
+import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
 import type { PlacementStore } from "../placement/store";
 import type { Point } from "../placement/projectDoc";
 import type { ComponentDefinition } from "../../bridge/kicad";
@@ -9,6 +9,8 @@ import {
   drawFootprint,
   ensureSchematic,
   componentContains,
+  componentProximities,
+  componentWorldBounds,
   replacementBoards,
   padPoint,
 } from "./domain";
@@ -43,6 +45,23 @@ export function createComponentEditor(
     drag: { id: string; start: Point; origin: VisualPcb } | null = null,
     session = "";
   const current = () => pcb()?.components?.find((c) => c.id === selected());
+  /** Derived overlap notification: recomputed from committed placements, so
+   * it never touches the document and vanishes as soon as pairs separate. */
+  const overlaps = createMemo(() =>
+    pcb() ? componentProximities(pcb()!.components ?? [], pcb()?.pxPerMm ?? 1) : [],
+  );
+  const overlapNotice = () => {
+    const list = overlaps();
+    if (!list.length) return "";
+    const unit = pcb()?.pxPerMm ? "mm" : "px";
+    return list
+      .map((o) =>
+        o.overlapping
+          ? `${o.a.reference} overlaps ${o.b.reference}`
+          : `${o.a.reference} near ${o.b.reference} (${Math.round(o.gapMm * 100) / 100} ${unit})`,
+      )
+      .join("; ");
+  };
   createEffect(() => {
     const key = store.projectSession() + ":" + pcb()?.id;
     if (key !== session) {
@@ -488,6 +507,11 @@ export function createComponentEditor(
           {(c) => (
             <div class="component-inspector">
               <h3>Component</h3>
+              <Show when={overlapNotice()}>
+                <p class="component-overlap" role="status">
+                  {overlapNotice()}
+                </p>
+              </Show>
               <For each={["reference", "value", "partName"] as const}>
                 {(key) => (
                   <label>
@@ -881,39 +905,69 @@ export function createComponentEditor(
     },
     draw: (
       ctx: CanvasRenderingContext2D,
+      scale = 1,
       offset?: { ids: Set<string>; dx: number; dy: number },
       selectedIds?: Set<string>,
     ) => {
-      for (const c of pcb()?.components ?? [])
-        if (
+      const px = pcb()?.pxPerMm ?? 1;
+      const visible = (pcb()?.components ?? []).filter(
+        (c) =>
           c.layerId === layer() ||
-          c.definition.footprint.pads.some((p) => p.plated && p.drill)
-        ) {
-          const isMoved = Boolean(offset?.ids.has(c.id));
-          const shiftX = isMoved && offset ? offset.dx : 0;
-          const shiftY = isMoved && offset ? offset.dy : 0;
-          const isSel = c.id === selected() || Boolean(selectedIds?.has(c.id));
-          drawFootprint(
-            ctx,
-            drag?.id === c.id
-              ? {
-                  ...c,
-                  x: c.x + cursor.x - drag.start.x,
-                  y: c.y + cursor.y - drag.start.y,
-                }
-              : isMoved
-              ? { ...c, x: c.x + shiftX, y: c.y + shiftY }
-              : c,
-            pcb()?.pxPerMm ?? 1,
-            isSel ? "#ffffff" : "#ffcd11",
+          c.definition.footprint.pads.some((p) => p.plated && p.drill),
+      );
+      // Drawn variants (drag/multi-drag drafts) so extents track the gesture.
+      const shown = visible.map((c) =>
+        drag?.id === c.id
+          ? {
+              ...c,
+              x: c.x + cursor.x - drag.start.x,
+              y: c.y + cursor.y - drag.start.y,
+            }
+          : offset?.ids.has(c.id)
+          ? { ...c, x: c.x + offset.dx, y: c.y + offset.dy }
+          : c,
+      );
+      for (const [i, c] of visible.entries()) {
+        const isSel = c.id === selected() || Boolean(selectedIds?.has(c.id));
+        drawFootprint(ctx, shown[i], px, isSel ? "#ffffff" : "#ffcd11");
+      }
+      const ghost =
+        armed() && pcb()?.pxPerMm
+          ? (() => {
+              const c = createInstance(pcb()!, armed()!, cursor, layer());
+              c.rotation = placementRotation();
+              ctx.save();
+              ctx.globalAlpha = 0.5;
+              drawFootprint(ctx, c, px, "#ffcd11");
+              ctx.restore();
+              return c;
+            })()
+          : undefined;
+      // Overlap notification: dashed danger outlines around components whose
+      // footprint extents collide or nearly do — including the placement
+      // ghost, so a bad drop is flagged before it happens.
+      const pairs = componentProximities(ghost ? [...shown, ghost] : shown, px);
+      if (pairs.length) {
+        const offenders = new Set<ElectricalComponent>();
+        for (const pair of pairs) {
+          offenders.add(pair.a);
+          offenders.add(pair.b);
+        }
+        const lineWidth = 1.5 / Math.max(scale, 1e-6);
+        ctx.save();
+        ctx.strokeStyle = "#e5484d";
+        ctx.lineWidth = lineWidth;
+        ctx.setLineDash([lineWidth * 2.5, lineWidth * 2]);
+        for (const c of offenders) {
+          const box = componentWorldBounds(c, px);
+          if (!box) continue;
+          ctx.strokeRect(
+            box.minX,
+            box.minY,
+            box.maxX - box.minX,
+            box.maxY - box.minY,
           );
         }
-      if (armed() && pcb()?.pxPerMm) {
-        const c = createInstance(pcb()!, armed()!, cursor, layer());
-        c.rotation = placementRotation();
-        ctx.save();
-        ctx.globalAlpha = 0.5;
-        drawFootprint(ctx, c, pcb()!.pxPerMm!, "#ffcd11");
         ctx.restore();
       }
     },

@@ -1,4 +1,4 @@
-﻿import { padCopperContains, padContours, padHole } from "./padGeometry";
+import { padCopperContains, padContours, padHole } from "./padGeometry";
 import type { Point } from "../placement/projectDoc";
 import type { VisualPcb } from "../visual/model";
 import { visualId } from "../visual/model";
@@ -164,8 +164,11 @@ export function drawFootprint(
   c: ElectricalComponent,
   px: number,
   color: string,
+  highlightPads?: Set<string>,
+  dimmed?: boolean,
 ) {
   ctx.save();
+  if (dimmed) ctx.globalAlpha *= 0.25;
   ctx.translate(c.x, c.y);
   ctx.rotate((c.rotation * Math.PI) / 180);
   ctx.scale(c.scale * px, c.scale * px);
@@ -174,6 +177,7 @@ export function drawFootprint(
   drawGraphics(ctx, c.definition.footprint.graphics);
   for (const p of c.definition.footprint.pads) {
     ctx.save();
+    const isPadHl = highlightPads?.has(p.number);
     const hole = padHole(p);
     if (hole.length) {
       ctx.beginPath();
@@ -183,7 +187,11 @@ export function drawFootprint(
       ctx.closePath();
       ctx.clip("evenodd");
     }
-    ctx.globalAlpha *= 0.7;
+    if (isPadHl) {
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.globalAlpha *= 0.7;
+    }
     for (const pts of padContours(p)) {
       if (!pts.length) continue;
       ctx.beginPath();
@@ -191,6 +199,13 @@ export function drawFootprint(
       for (const q of pts.slice(1)) ctx.lineTo(q.x, q.y);
       ctx.closePath();
       ctx.fill();
+      if (isPadHl) {
+        ctx.save();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = Math.max(0.1, 2.5 / Math.max(0.001, c.scale * px));
+        ctx.stroke();
+        ctx.restore();
+      }
     }
     ctx.restore();
     ctx.font = ".7px sans-serif";
@@ -262,6 +277,95 @@ export function replacementBoards(
     ensureSchematic(p);
   }
   return { boards, detached };
+}
+/** Footprint extent boxes closer than this many millimetres count as
+ * "very near" even without intersecting. Extent boxes are conservative
+ * (graphics anchors plus circumscribed pad extents, not courtyard outlines),
+ * so the threshold stays small to avoid flagging legitimate dense layouts. */
+export const NEAR_OVERLAP_MM = 0.5;
+export interface ComponentProximity {
+  a: ElectricalComponent;
+  b: ElectricalComponent;
+  /** True when the extent boxes intersect; touching counts. */
+  overlapping: boolean;
+  /** Box separation in millimetres; 0 when overlapping. */
+  gapMm: number;
+}
+/** World-space AABB of a placed component's footprint extents — the same
+ * geometry used for body hit-testing, rotated, scaled and offset like
+ * padPoint. */
+export function componentWorldBounds(
+  c: ElectricalComponent,
+  pxPerMm: number,
+): Bounds | undefined {
+  const b = footprintBounds(c.definition.footprint);
+  if (!b) return undefined;
+  const a = (c.rotation * Math.PI) / 180,
+    s = c.scale * pxPerMm,
+    cos = Math.cos(a) * s,
+    sin = Math.sin(a) * s,
+    corners = [
+      { x: b.minX, y: b.minY },
+      { x: b.maxX, y: b.minY },
+      { x: b.minX, y: b.maxY },
+      { x: b.maxX, y: b.maxY },
+    ].map((p) => ({
+      x: c.x + p.x * cos - p.y * sin,
+      y: c.y + p.x * sin + p.y * cos,
+    }));
+  return {
+    minX: Math.min(...corners.map((p) => p.x)),
+    minY: Math.min(...corners.map((p) => p.y)),
+    maxX: Math.max(...corners.map((p) => p.x)),
+    maxY: Math.max(...corners.map((p) => p.y)),
+  };
+}
+/** Pairs of components whose footprint extent boxes overlap or sit closer
+ * than `nearMm`. Same-layer pairs only: front and back components may stack
+ * physically. Result order is deterministic so notifications stay stable
+ * across redraws. */
+export function componentProximities(
+  components: ElectricalComponent[],
+  pxPerMm: number,
+  nearMm = NEAR_OVERLAP_MM,
+): ComponentProximity[] {
+  const px = pxPerMm > 0 ? pxPerMm : 1,
+    near = nearMm * px,
+    boxes = components.map((c) => ({
+      c,
+      box: componentWorldBounds(c, px),
+    })),
+    result: ComponentProximity[] = [];
+  for (let i = 0; i < boxes.length; i++) {
+    const first = boxes[i];
+    if (!first.box) continue;
+    for (let j = i + 1; j < boxes.length; j++) {
+      const second = boxes[j];
+      if (!second.box || first.c.layerId !== second.c.layerId) continue;
+      const dx = Math.max(
+          first.box.minX - second.box.maxX,
+          second.box.minX - first.box.maxX,
+        ),
+        dy = Math.max(
+          first.box.minY - second.box.maxY,
+          second.box.minY - first.box.maxY,
+        );
+      if (dx > near || dy > near) continue;
+      const gapPx = Math.hypot(Math.max(0, dx), Math.max(0, dy));
+      if (gapPx > near) continue;
+      result.push({
+        a: first.c,
+        b: second.c,
+        overlapping: dx <= 0 && dy <= 0,
+        gapMm: gapPx / px,
+      });
+    }
+  }
+  return result.sort(
+    (x, y) =>
+      x.a.reference.localeCompare(y.a.reference) ||
+      x.b.reference.localeCompare(y.b.reference),
+  );
 }
 /** Component body selection is deliberately broader than electrical copper hit testing. */
 export function componentContains(

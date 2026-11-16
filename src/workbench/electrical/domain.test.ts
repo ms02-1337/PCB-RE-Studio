@@ -5,6 +5,8 @@ import {
   drawGraphics,
   createInstance,
   footprintBounds,
+  componentProximities,
+  componentWorldBounds,
   replacementBoards,
   ensureSchematic,
   terminalNumbers,
@@ -265,4 +267,82 @@ it("draws the reference centered above the top edge of the footprint extents", (
   expect(label!.y).toBeCloseTo(-2.486);
   expect(ctx.textAlign).toBe("center");
   expect(ctx.textBaseline).toBe("bottom");
+});
+
+it("computes placed world bounds through rotation, scale and calibration", () => {
+  const c = createInstance(board(), definition, { x: 10, y: 20 }, "front");
+  const flat = componentWorldBounds(c, 1)!;
+  expect(flat.minX).toBeCloseTo(7.764);
+  expect(flat.maxX).toBeCloseTo(22.236);
+  expect(flat.minY).toBeCloseTo(17.764);
+  expect(flat.maxY).toBeCloseTo(22.236);
+  c.rotation = 90;
+  const turned = componentWorldBounds(c, 1)!;
+  expect(turned.minX).toBeCloseTo(7.764);
+  expect(turned.maxX).toBeCloseTo(12.236);
+  expect(turned.minY).toBeCloseTo(17.764);
+  expect(turned.maxY).toBeCloseTo(32.236);
+  c.rotation = 0;
+  const zoomed = componentWorldBounds(c, 2)!;
+  expect(zoomed.minX).toBeCloseTo(5.528);
+  expect(zoomed.maxX).toBeCloseTo(34.472);
+  expect(zoomed.minY).toBeCloseTo(15.528);
+  expect(zoomed.maxY).toBeCloseTo(24.472);
+  expect(
+    componentWorldBounds(
+      {
+        ...c,
+        definition: {
+          ...c.definition,
+          footprint: { ...c.definition.footprint, pads: [], graphics: [] },
+        },
+      },
+      1,
+    ),
+  ).toBeUndefined();
+});
+
+it("flags overlapping and near same-layer extents in deterministic order", () => {
+  const b = board();
+  const stacked = createInstance(b, definition, { x: 0, y: 0 }, "front");
+  b.components = [stacked];
+  const near = createInstance(b, definition, { x: 14.772, y: 0 }, "front");
+  b.components = [stacked, near];
+  const far = createInstance(b, definition, { x: 40, y: 0 }, "front");
+  b.components = [stacked, near, far];
+  const back = createInstance(b, definition, { x: 0, y: 0 }, "back");
+  b.components = [stacked, near, far, back];
+  const twin = createInstance(b, definition, { x: 0, y: 0 }, "front");
+  // Array order must not affect pair ordering or references U1..U5.
+  b.components = [far, near, back, stacked, twin];
+  const pairs = componentProximities(b.components, 1);
+  expect(pairs.map((o) => `${o.a.reference}/${o.b.reference}`)).toEqual([
+    "U1/U5",
+    "U2/U1",
+    "U2/U5",
+  ]);
+  expect(pairs[0].overlapping).toBe(true);
+  expect(pairs[0].gapMm).toBe(0);
+  expect(pairs[1].overlapping).toBe(false);
+  expect(pairs[1].gapMm).toBeCloseTo(0.3, 3);
+  expect(pairs[2].gapMm).toBeCloseTo(0.3, 3);
+});
+
+it("expresses proximity gaps in millimetres regardless of calibration", () => {
+  const one = board();
+  const a = createInstance(one, definition, { x: 0, y: 0 }, "front");
+  const b = createInstance(one, definition, { x: 14.772, y: 0 }, "front");
+  const two = { ...board(), pxPerMm: 2 };
+  const doubled = [
+    createInstance(two, definition, { x: 0, y: 0 }, "front"),
+  ];
+  two.components = doubled;
+  const c = createInstance(two, definition, { x: 29.544, y: 0 }, "front");
+  two.components = [...doubled, c];
+  expect(componentProximities([a, b], 1)[0].gapMm).toBeCloseTo(
+    componentProximities(two.components, 2)[0].gapMm,
+    6,
+  );
+  // Same physical layout at a coarser calibration stays a near miss.
+  expect(componentProximities(two.components, 2)[0].gapMm).toBeCloseTo(0.3, 3);
 });

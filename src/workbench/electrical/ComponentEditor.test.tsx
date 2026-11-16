@@ -265,6 +265,50 @@ it("renders a transient component drag without writing the document", () => {
   }
 });
 
+it("notifies about overlapping and near components until they separate", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+  expect(screen.getByRole("status").textContent).toBe("U1 overlaps U2");
+  const near = structuredClone(store.visual.activePcb()!);
+  near.components![1].x = 12.9;
+  store.visual.replacePcb(near);
+  expect(screen.getByRole("status").textContent).toBe("U1 near U2 (0.07 mm)");
+  const apart = structuredClone(store.visual.activePcb()!);
+  apart.components![1].x = 100;
+  store.visual.replacePcb(apart);
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
+it("outlines colliding components and flags them while placing", () => {
+  const state: Record<string, unknown> = { globalAlpha: 1, strokeRect: vi.fn() };
+  const ctx = new Proxy(state, { get: (t, k) => t[k as string] ?? (() => {}) }) as unknown as CanvasRenderingContext2D;
+  const draw = vi.spyOn(domain, "drawFootprint").mockImplementation(() => {});
+  try {
+    editor.arm(definition);
+    editor.down({ x: 0, y: 0 });
+    editor.key("Escape");
+    editor.draw(ctx, 2);
+    expect(state.strokeRect).not.toHaveBeenCalled();
+    editor.arm(definition);
+    editor.down({ x: 0, y: 0 });
+    editor.key("Escape");
+    state.strokeRect = vi.fn();
+    editor.draw(ctx, 2);
+    expect(state.strokeRect).toHaveBeenCalledTimes(2);
+    expect(state.lineWidth).toBe(0.75);
+    editor.arm(definition);
+    editor.move({ x: 0, y: 0 });
+    state.strokeRect = vi.fn();
+    editor.draw(ctx, 2);
+    expect(state.strokeRect).toHaveBeenCalledTimes(3);
+  } finally {
+    draw.mockRestore();
+  }
+});
+
 it("blocks uncalibrated arming with a visible error even without a selection", () => {
   const pcb = structuredClone(store.visual.activePcb()!);
   delete pcb.pxPerMm;

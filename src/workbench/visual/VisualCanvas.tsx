@@ -473,7 +473,7 @@ export function VisualCanvas(props: {
           dy: multiDrag.currentWorld.y - multiDrag.startWorld.y,
         }
       : undefined;
-    props.components?.draw(ctx, multiOffset, selectedComponents);
+    props.components?.draw(ctx, scale, multiOffset, selectedComponents);
     props.copper?.draw(ctx, scale, multiOffset, selectedCopper);
     if (boxSelect) {
       const minX = Math.min(boxSelect.startWorld.x, boxSelect.currentWorld.x);

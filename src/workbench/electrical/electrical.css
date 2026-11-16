@@ -105,6 +105,12 @@
 .electrical-error {
   color: var(--danger);
 }
+/* Overlap notification banner in the component inspector. */
+.component-overlap {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
 .schematic-unit {
   cursor: move;
 }
