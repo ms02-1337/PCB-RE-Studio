@@ -195,6 +195,8 @@ export function TypeManager(props: { store: PlacementStore; onClose: () => void 
               </For>
             </tbody>
           </table>
+        </div>
+        <div class="type-dialog-add">
           <div class="type-add">
             <label>
               <span>Name</span>
