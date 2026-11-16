@@ -367,7 +367,7 @@ h1 {
   border-top: 1px solid var(--border);
   padding: 14px;
 }
-footer {
+.workbench > footer {
   height: 28px;
   flex: 0 0 28px;
   border-top: 1px solid var(--border);
@@ -378,16 +378,16 @@ footer {
   background: var(--surface);
   font-size: 12px;
 }
-footer [role="status"] {
+.workbench > footer [role="status"] {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-footer > div {
+.workbench > footer > div {
   display: flex;
   flex-shrink: 0;
 }
-footer button {
+.workbench > footer button {
   padding: 3px 10px;
 }
 .overlay {
@@ -819,19 +819,19 @@ footer button {
 }
 .settings-actions {
   background: var(--surface);
-  flex: 0 0 42px;
+  flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
+  padding: 12px;
   border-top: 1px solid var(--border);
 }
 .dialog-header { padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--dialog-border); }
 .dialog-header h2 { margin: 0; text-transform: none; font-size: 13px; }
 .dialog-content { padding: 20px 16px; overflow: auto; }
 .dialog-content p { margin: 0; }
-.dialog-actions { display: flex; justify-content: flex-end; padding: 14px 16px; background: var(--surface); border-top: 1px solid var(--border); }
+.dialog-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; padding: 14px 16px; background: var(--surface); border-top: 1px solid var(--border); }
 .settings-actions .settings-apply {
   background: var(--accent);
   color: #181818;
