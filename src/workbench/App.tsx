@@ -402,7 +402,7 @@ export default function App(props: { projectName?: string }) {
                   },
                   !placement.doc(),
                 )}
-                {menuAction("Autosave settings…", (target) =>
+                {menuAction("Configuration", (target) =>
                   openSettings(target),
                 )}
               </div>
@@ -420,20 +420,6 @@ export default function App(props: { projectName?: string }) {
               </div>
             </details>
           </nav>
-          <button
-            onClick={toggleTheme}
-            aria-label={`Switch to ${theme() === "dark" ? "light" : "dark"} theme`}
-            title="Toggle color theme"
-          >
-            {theme() === "dark" ? "☼" : "☾"}
-          </button>
-          <button
-            onClick={(event) => openSettings(event.currentTarget)}
-            aria-label="Settings"
-            title="Settings"
-          >
-            ⚙
-          </button>
         </div>
         <div
           class="window-title"

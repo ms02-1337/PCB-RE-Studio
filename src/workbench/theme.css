@@ -806,12 +806,22 @@ h1 {
   color: var(--muted);
 }
 .settings-field input,
+.settings-field select,
 .settings-field button {
   width: fit-content;
   min-width: 120px;
   padding: 5px 8px;
   background: var(--bg);
   border: 1px solid var(--border);
+}
+.settings-field select {
+  padding-right: 24px;
+}
+.settings-theme-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 /* Compact action row beside a settings input (Libraries source path). */
 .library-path-actions { display: flex; gap: 6px; }

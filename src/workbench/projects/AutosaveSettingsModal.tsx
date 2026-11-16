@@ -166,12 +166,26 @@ export function AutosaveSettingsModal(props: {
                 <h3>General</h3>
                 <label class="settings-field">
                   <span>Color theme</span>
-                  <button
-                    onClick={props.onToggleTheme}
-                    aria-label={`Switch to ${props.theme === "dark" ? "light" : "dark"} theme`}
-                  >
-                    <ActionIcon name="Settings" />{props.theme === "dark" ? "Dark" : "Light"}
-                  </button>
+                  <div class="settings-theme-row">
+                    <select
+                      aria-label="Color theme"
+                      value={props.theme}
+                      onChange={(e) => {
+                        const next = e.currentTarget.value as "dark" | "light";
+                        if (next !== props.theme) props.onToggleTheme();
+                      }}
+                    >
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={props.onToggleTheme}
+                      aria-label={`Switch to ${props.theme === "dark" ? "light" : "dark"} theme`}
+                    >
+                      {props.theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+                    </button>
+                  </div>
                 </label>
                 <p class="settings-about">{props.appInfo}</p>
             </section>

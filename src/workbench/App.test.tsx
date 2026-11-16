@@ -1,4 +1,4 @@
-﻿import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import { it, expect, beforeEach, afterEach, vi } from "vitest";
 import App from "./App";
 import { SEED_TYPES, type ProjectDoc } from "./placement/projectDoc";
@@ -127,7 +127,7 @@ it("removes palette, sidebar and bottom panel and adds File/Edit/About menus", (
     .closest("details")!;
   expect(fileMenu.open).toBe(false);
   expect(editMenu.open).toBe(true);
-  screen.getByRole("menuitem", { name: "Autosave settings…" }).focus();
+  screen.getByRole("menuitem", { name: "Configuration" }).focus();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(editMenu.open).toBe(false);
   expect(document.activeElement).toBe(
@@ -159,15 +159,15 @@ it("removes palette, sidebar and bottom panel and adds File/Edit/About menus", (
   );
 }, 15_000);
 
-it("opens Settings from the title bar on every tab and restores keyboard focus", () => {
+it("opens Configuration from Edit menu on every tab and restores keyboard focus", () => {
   render(() => <App />);
-  const settings = screen.getByRole("button", { name: "Settings" });
-  expect(settings.closest(".titlebar")).toBeTruthy();
-  expect(settings.closest("nav")).toBeNull();
   for (const tab of screen.getAllByRole("tab")) {
     fireEvent.click(tab);
-    settings.focus();
-    fireEvent.click(settings);
+    const editSummary = screen.getByText("Edit", { selector: "summary" });
+    fireEvent.click(editSummary);
+    const config = screen.getByRole("menuitem", { name: "Configuration" });
+    config.focus();
+    fireEvent.click(config);
     const dialog = screen.getByRole("dialog", { name: "Settings" });
     const first = screen.getByRole("tab", { name: "General" });
     const last = screen.getByRole("button", { name: "Apply" });
@@ -180,7 +180,7 @@ it("opens Settings from the title bar on every tab and restores keyboard focus",
     expect(document.activeElement).toBe(closeButton);
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(settings);
+    expect(document.activeElement).toBe(editSummary);
   }
 }, 15_000);
 
@@ -218,13 +218,19 @@ it("navigates all six panels with roving keyboard focus", () => {
   expect(tabs.filter((tab) => tab.tabIndex === 0)).toEqual([tabs[2]]);
 });
 it("switches and restores theme, including unavailable storage", () => {
+  const openConfig = () => {
+    fireEvent.click(screen.getByText("Edit", { selector: "summary" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Configuration" }));
+  };
   const first = render(() => <App />);
+  openConfig();
   fireEvent.click(screen.getByLabelText("Switch to light theme"));
   expect(
     first.container.querySelector(".workbench")?.getAttribute("data-theme"),
   ).toBe("light");
   first.unmount();
   const second = render(() => <App />);
+  openConfig();
   expect(screen.getByLabelText("Switch to dark theme")).toBeTruthy();
   second.unmount();
   const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
@@ -237,6 +243,7 @@ it("switches and restores theme, including unavailable storage", () => {
     });
   try {
     render(() => <App />);
+    openConfig();
     fireEvent.click(screen.getByLabelText("Switch to light theme"));
     expect(screen.getByLabelText("Switch to dark theme")).toBeTruthy();
   } finally {
@@ -294,7 +301,7 @@ it("offers project actions in the File menu with honest gating", () => {
   expect(
     (
       screen.getByRole("menuitem", {
-        name: "Autosave settings…",
+        name: "Configuration",
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(false);
@@ -365,7 +372,7 @@ it("keeps save state out of the status bar; the badge stays the only surface", a
 it("applies autosave settings from Edit and persists them", () => {
   render(() => <App />);
   fireEvent.click(screen.getByText("Edit", { selector: "summary" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Autosave settings…" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Configuration" }));
   fireEvent.click(screen.getByRole("tab", { name: "Autosave" }));
   expect(document.activeElement).toBe(
     screen.getByRole("tab", { name: "Autosave" }),
@@ -384,7 +391,8 @@ it("applies autosave settings from Edit and persists them", () => {
 
 it("keeps both Settings tab panels available to their controls", () => {
   render(() => <App />);
-  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(screen.getByText("Edit", { selector: "summary" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Configuration" }));
   const generalTab = screen.getByRole("tab", { name: "General" });
   const autosaveTab = screen.getByRole("tab", { name: "Autosave" });
   const generalPanel = document.getElementById(
@@ -411,7 +419,7 @@ it("keeps saved autosave settings applied across restarts", async () => {
   // The stored preference loads again on the next mount.
   const second = render(() => <App />);
   fireEvent.click(screen.getByText("Edit", { selector: "summary" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Autosave settings…" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Configuration" }));
   fireEvent.click(screen.getByRole("tab", { name: "Autosave" }));
   expect(
     (screen.getByLabelText("Enable autosave") as HTMLInputElement).checked,
