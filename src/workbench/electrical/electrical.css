@@ -114,3 +114,35 @@
 .schematic-unit:focus-visible .symbol-selection {
   stroke: var(--focus);
 }
+/* Wire joint editing: bend handles remove, midpoint handles add. */
+.schematic-bend,
+.schematic-joint-add {
+  cursor: pointer;
+}
+.schematic-bend:focus,
+.schematic-joint-add:focus {
+  outline: none;
+}
+.schematic-bend:focus-visible {
+  stroke: var(--focus);
+  stroke-width: 0.4;
+}
+.schematic-joint-add circle {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 0.25;
+}
+.schematic-joint-add path {
+  stroke: var(--muted);
+  stroke-width: 0.25;
+  fill: none;
+}
+.schematic-joint-add:hover circle,
+.schematic-joint-add:focus-visible circle {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+.schematic-joint-add:hover path,
+.schematic-joint-add:focus-visible path {
+  stroke: var(--bg);
+}

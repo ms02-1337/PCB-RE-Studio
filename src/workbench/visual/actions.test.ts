@@ -182,6 +182,24 @@ describe("store-level transform commits", () => {
     return store;
   }
 
+  it("mirrors the full stack in one undo entry and survives document reload", async () => {
+    const store = await setup();
+    store.visual.addImage(store.visual.activePcb()!.id, asset, "Back", 350, 240);
+    const before = JSON.stringify(store.visual.activePcb());
+    expect(store.visual.mirrorAllImages("horizontal")).toBe(true);
+    const after = JSON.stringify(store.visual.activePcb());
+    expect(after).not.toBe(before);
+    store.undo(); expect(JSON.stringify(store.visual.activePcb())).toBe(before);
+    store.redo(); expect(JSON.stringify(store.visual.activePcb())).toBe(after);
+    const doc = JSON.parse(JSON.stringify(store.doc())) as ProjectDoc;
+    const reloaded = createVisualActions(() => doc, change => change(doc));
+    expect(JSON.stringify(reloaded.activePcb())).toBe(after);
+    store.visual.updateImage(store.visual.activePcb()!.images[1].id, { locked: true, visible: false });
+    const locked = JSON.stringify(store.doc());
+    expect(store.visual.mirrorAllImages("vertical")).toBe(false);
+    expect(JSON.stringify(store.doc())).toBe(locked);
+  });
+
   it("commits a full transform gesture as exactly one undo entry and restores the pre-gesture values", async () => {
     const store = await setup();
     const image = store.visual.activePcb()!.images[0];

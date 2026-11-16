@@ -250,8 +250,8 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
     // ResizeObserver fires after layout but BEFORE paint; leaving the
     // repaint to the frame loop would composite the just-cleared bitmap as a
     // blank frame on every resize tick (the sidebar-resize flicker). Paint
-    // synchronously here — after the signal writes above (setSize runs the
-    // fit effect, which may arm a frame via markDirty) — and drop any frame
+    // synchronously here - after the signal writes above (setSize runs the
+    // fit effect, which may arm a frame via markDirty) - and drop any frame
     // this repaint supersedes.
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
@@ -473,7 +473,7 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
   };
 
   /** Hover lookup at a scene point (no active drag): topmost component hit,
-   * the one-line status-bar summary, and the Select-tool cursor — a handle of
+   * the one-line status-bar summary, and the Select-tool cursor - a handle of
    * the selected unlocked shape wins with its direction cursor, then an
    * unlocked component or picture reads "move", a locked one
    * "not-allowed", otherwise the tool baseline. */
@@ -830,7 +830,7 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
                 <span class="tip-dot" style={{ background: chip.color }} aria-hidden="true" />
                 {chip.name}
               </span>
-              <span>{info.partNumber || info.value || "—"}</span>
+              <span>{info.partNumber || info.value || "-"}</span>
               <Show when={info.marking}>
                 <span class="tip-marking">Marking: {info.marking}</span>
               </Show>
@@ -861,7 +861,7 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
               <button
                 class="pl-crop-apply"
                 disabled={locked}
-                title={locked ? "Picture is locked — unlock to crop" : "Apply the crop"}
+                title={locked ? "Picture is locked - unlock to crop" : "Apply the crop"}
                 onClick={() => {
                   store.applyCrop();
                   markDirty();
@@ -978,8 +978,8 @@ function drawPadlock(
 ): void {
   const box = geo.bbox(shape);
   const corner = transform({ x: box.x + box.w, y: box.y });
-  // Vector padlock (screen px): shackle arc + body rect, stroked twice —
-  // a dark halo pass for contrast on any board, then the light glyph —
+  // Vector padlock (screen px): shackle arc + body rect, stroked twice -
+  // a dark halo pass for contrast on any board, then the light glyph -
   // matching the stroke-line style of the titlebar icons.
   const width = 11;
   const height = 10;

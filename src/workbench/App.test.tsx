@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   // window.ts pulls @tauri-apps/api/window, whose modules import several
-  // core bindings at load time — provide the full export surface.
+  // core bindings at load time - provide the full export surface.
   Channel: class {},
   PluginListener: class {},
   Resource: class {},
@@ -160,7 +160,7 @@ it("removes palette, sidebar and bottom panel and adds File/Edit/About menus", (
 }, 15_000);
 
 it("opens Configuration from Edit menu on every tab and restores keyboard focus", () => {
-  render(() => <App />);
+  render(() => <App projectName="Demo project" />);
   for (const tab of screen.getAllByRole("tab")) {
     fireEvent.click(tab);
     const editSummary = screen.getByText("Edit", { selector: "summary" });
@@ -184,8 +184,21 @@ it("opens Configuration from Edit menu on every tab and restores keyboard focus"
   }
 }, 15_000);
 
-it("navigates all six panels with roving keyboard focus", () => {
+it("keeps board mapping, visual editor, schematic, bom and nets tabs disabled when no project is open", () => {
   render(() => <App />);
+  const tabs = screen.getAllByRole("tab");
+  expect(tabs[0].hasAttribute("disabled")).toBe(false);
+  for (let i = 1; i <= 5; i++) {
+    expect(tabs[i].hasAttribute("disabled")).toBe(true);
+    fireEvent.click(tabs[i]);
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(
+      "tab-0",
+    );
+  }
+});
+
+it("navigates all six panels with roving keyboard focus", () => {
+  render(() => <App projectName="Demo project" />);
   const tabs = screen.getAllByRole("tab");
   expect(tabs.map((tab) => tab.textContent)).toEqual([
     "Projects",
@@ -253,24 +266,26 @@ it("switches and restores theme, including unavailable storage", () => {
 });
 it("provides a centered title fallback and disabled preview window controls", () => {
   const view = render(() => <App />);
-  expect(screen.getByTitle("PCB RE Studio — No project open")).toBeTruthy();
+  expect(screen.getByTitle("PCB RE Studio - No project open")).toBeTruthy();
   for (const name of ["Minimize", "Maximize", "Close window"])
     expect((screen.getByLabelText(name) as HTMLButtonElement).disabled).toBe(
       true,
     );
   view.unmount();
   render(() => <App projectName="Board revision A" />);
-  expect(screen.getByTitle("PCB RE Studio — Board revision A")).toBeTruthy();
+  expect(screen.getByTitle("PCB RE Studio - Board revision A")).toBeTruthy();
 });
 it("hosts the Projects panel in tab 0", () => {
-  render(() => <App />);
+  const view = render(() => <App />);
   expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(
     "tab-0",
   );
   // ProjectsPanel's no-project state: New/Open + recent list.
   expect(screen.getByRole("button", { name: "New project…" })).toBeTruthy();
   expect(screen.getByText("No recent projects yet.")).toBeTruthy();
-  // Switching to Board mapping hides the Projects panel and shows placement.
+  view.unmount();
+  // With an open project, switching to Board mapping hides Projects and shows placement.
+  render(() => <App projectName="Demo project" />);
   fireEvent.click(screen.getAllByRole("tab")[1]);
   expect(document.getElementById("panel-0")?.hasAttribute("hidden")).toBe(true);
   expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(
@@ -360,7 +375,7 @@ it("keeps save state out of the status bar; the badge stays the only surface", a
   // Once the project is open the badge appears and the status bar reads Ready.
   await waitFor(() => expect(view.container.querySelector(".tab-save-badge")).toBeTruthy());
   expect(footer().textContent).toBe("Ready");
-  // A pending mutation dirties the badge only — never the footer.
+  // A pending mutation dirties the badge only - never the footer.
   const name = screen.getByLabelText("Project name");
   fireEvent.input(name, { target: { value: "Demo board v2" } });
   fireEvent.blur(name);

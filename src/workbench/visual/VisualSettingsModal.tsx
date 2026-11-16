@@ -1,18 +1,31 @@
 import { onMount, createSignal, Show, For } from "solid-js";
+import { ActionIcon } from "../ActionIcon";
 import type { PlacementStore } from "../placement/store";
 import { MAX_VISUAL_LAYERS } from "./model";
 import { layerResizePlan } from "./copper";
+import {
+  MAX_COPPER_MM,
+  MIN_COPPER_MM,
+  loadCopperDefaults,
+  saveCopperDefaults,
+  type CopperDefaults,
+} from "./defaults";
 
 export function VisualSettingsModal(props: {
   store: PlacementStore;
   onClose: () => void;
   restoreFocusTo: HTMLElement | null;
+  /** Live-syncs the copper editor's placement parameters when the persisted
+   * defaults change (drafts already in progress keep their captured values). */
+  onCopperDefaults?: (defaults: CopperDefaults) => void;
 }) {
   let countInput!: HTMLInputElement;
+  onMount(() => countInput.focus());
   const [pendingCount, setPendingCount] = createSignal<number | null>(null);
   const [destination, setDestination] = createSignal("");
   const [conflicts, setConflicts] = createSignal<string[]>([]);
   const [survivor, setSurvivor] = createSignal("");
+  const [copperDefaults, setCopperDefaults] = createSignal(loadCopperDefaults());
   const survivors = () => {
     const layers = props.store.visual.activePcb()?.layers ?? [];
     const count = pendingCount() ?? layers.length;
@@ -20,14 +33,43 @@ export function VisualSettingsModal(props: {
       ? layers.slice(0, 1)
       : [...layers.slice(0, Math.max(1, count - 1)), layers.at(-1)!];
   };
-  onMount(() => countInput.focus());
   const close = () => {
     props.onClose();
     if (props.restoreFocusTo?.isConnected) props.restoreFocusTo.focus();
   };
+  /** Applies one dimension default (like the layer count: valid changes take
+   * effect immediately; invalid entries revert the field). The via pair is
+   * cross-validated: the diameter must stay larger than the drill. */
+  const setDimension = (
+    event: Event & { currentTarget: HTMLInputElement },
+    key: "traceWidthMm" | "viaDiameterMm" | "viaDrillMm",
+  ) => {
+    const value = Number(event.currentTarget.value);
+    const current = copperDefaults();
+    const valid =
+      Number.isFinite(value) &&
+      value >= MIN_COPPER_MM &&
+      value <= MAX_COPPER_MM &&
+      (key !== "viaDiameterMm" || value > current.viaDrillMm) &&
+      (key !== "viaDrillMm" || value < current.viaDiameterMm);
+    if (!valid) {
+      event.currentTarget.value = String(current[key]);
+      return;
+    }
+    const next = { ...current, [key]: value };
+    setCopperDefaults(next);
+    saveCopperDefaults(next);
+    props.onCopperDefaults?.(next);
+  };
+  const setRoute45 = (checked: boolean) => {
+    const next = { ...copperDefaults(), route45: checked };
+    setCopperDefaults(next);
+    saveCopperDefaults(next);
+    props.onCopperDefaults?.(next);
+  };
   return (
     <div
-      class="overlay"
+      class="overlay overlay--center"
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -197,10 +239,57 @@ export function VisualSettingsModal(props: {
               Cancel reassignment
             </button>
           </Show>
+          <div class="ve-copper-defaults">
+            <h3>Copper placement defaults</h3>
+            <label>
+              Default trace width (mm)
+              <input
+                type="number"
+                min={MIN_COPPER_MM}
+                max={MAX_COPPER_MM}
+                step="0.1"
+                value={copperDefaults().traceWidthMm}
+                onChange={(event) => setDimension(event, "traceWidthMm")}
+              />
+            </label>
+            <label>
+              Default via diameter (mm)
+              <input
+                type="number"
+                min={MIN_COPPER_MM}
+                max={MAX_COPPER_MM}
+                step="0.1"
+                value={copperDefaults().viaDiameterMm}
+                onChange={(event) => setDimension(event, "viaDiameterMm")}
+              />
+            </label>
+            <label>
+              Default via drill (mm)
+              <input
+                type="number"
+                min={MIN_COPPER_MM}
+                max={MAX_COPPER_MM}
+                step="0.05"
+                value={copperDefaults().viaDrillMm}
+                onChange={(event) => setDimension(event, "viaDrillMm")}
+              />
+            </label>
+            <label>
+              45° routing by default
+              <input
+                type="checkbox"
+                checked={copperDefaults().route45}
+                onChange={(event) => setRoute45(event.currentTarget.checked)}
+              />
+            </label>
+          </div>
         </div>
-        <div class="dialog-actions">
-          <button onClick={close}>Close</button>
-        </div>
+        <footer class="type-dialog-footer">
+          <button class="type-close" onClick={close}>
+            <ActionIcon name="Close" />
+            Close
+          </button>
+        </footer>
       </section>
     </div>
   );

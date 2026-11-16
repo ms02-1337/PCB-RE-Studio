@@ -36,7 +36,7 @@ export interface BoardTransform {
   rotation: Rotation;
   flipH: boolean;
   flipV: boolean;
-  /** Percent (10–800 per schema validation). */
+  /** Percent (10-800 per schema validation). */
   scale: number;
   locked: boolean;
 }

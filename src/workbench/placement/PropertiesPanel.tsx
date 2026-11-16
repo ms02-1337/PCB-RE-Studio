@@ -177,7 +177,7 @@ export function PropertiesPanel(props: {
                   <div class="pl-empty">
                     <h2>Properties</h2>
                     <p>
-                      {board()!.name} — {Math.round(displaySize(board()!).width)} ×{" "}
+                      {board()!.name} - {Math.round(displaySize(board()!).width)} ×{" "}
                       {Math.round(displaySize(board()!).height)} px displayed
                     </p>
                     <p>
@@ -209,12 +209,12 @@ export function PropertiesPanel(props: {
 </label></header>
               <Show when={duplicates().has(component()!.refdes)}>
                 <p class="pl-error" role="alert">
-                  Refdes “{component()!.refdes}” is already used — refdes values must be unique
+                  Refdes “{component()!.refdes}” is already used - refdes values must be unique
                   project-wide; saving is blocked.
                 </p>
               </Show>
               <Show when={component()!.locked}>
-                <p class="muted">Component is locked — unlock to edit.</p>
+                <p class="muted">Component is locked - unlock to edit.</p>
               </Show>
               <Show when={error()}>
                 <p class="pl-error" role="alert">
@@ -473,9 +473,9 @@ function BoardInspector(props: { store: PlacementStore }) {
           }}
         />
       </header>
-      <p class="muted">Board picture selected — transform how it is displayed.</p>
+      <p class="muted">Board picture selected - transform how it is displayed.</p>
       <Show when={locked()}>
-        <p class="muted">Picture is locked — unlock to transform.</p>
+        <p class="muted">Picture is locked - unlock to transform.</p>
       </Show>
       <fieldset>
         <legend>Board picture</legend>

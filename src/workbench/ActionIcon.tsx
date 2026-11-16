@@ -22,7 +22,7 @@ export function ActionIcon(props: { name: string }) {
       <Match when={/close|cancel/i.test(props.name)}><path d="m5 5 10 10M15 5 5 15" /></Match>
       <Match when={/settings|types/i.test(props.name)}><path d="M3 6h14M3 14h14M7 3v6M13 11v6" /></Match>
       <Match when={/paste/i.test(props.name)}><path d="M7 4H4v13h12V4h-3M7 2h6v4H7z" /></Match>
-      {/* Circular arrows: the head points left (CCW first — "CCW" also
+      {/* Circular arrows: the head points left (CCW first - "CCW" also
           contains "CW") or right, like the feather rotate icons. */}
       <Match when={/ccw/i.test(props.name)}><path d="M.8 3.3v5h5M2.9 12.5a7.5 7.5 0 1 0 1.8-7.8L.8 8.3" /></Match>
       <Match when={/cw|rotate/i.test(props.name)}><path d="M19.2 3.3v5h-5M17.1 12.5a7.5 7.5 0 1 1-1.8-7.8l3.9 4.1" /></Match>

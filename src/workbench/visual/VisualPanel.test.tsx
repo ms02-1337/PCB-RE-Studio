@@ -15,6 +15,7 @@ const asset = { hash: "a".repeat(64), size: 42, name: "photo.png" };
 let store: ReturnType<typeof createPlacementStore>;
 beforeEach(async () => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+  localStorage.clear(); // isolate the persisted copper placement defaults
   const doc: ProjectDoc = { schemaVersion: 1, name: "Test", createdAt: "t", updatedAt: "t", types: SEED_TYPES, boards: [], components: [], assets: {} };
   store = createPlacementStore({ openProject: async () => ({ doc, assets: {}, path: "C:\\test.pcbre" }), save: vi.fn() });
   await store.openProject("C:\\test.pcbre");
@@ -162,9 +163,9 @@ it("confirms assigned inner-layer removal and can cancel it", () => {
   render(() => <VisualPanel store={store} active />);
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   fireEvent.click(screen.getByRole("button", { name: "Visual editor settings" }));
-  fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "4" } });
+  fireEvent.change(screen.getByRole("spinbutton", { name: "Copper layers" }), { target: { value: "4" } });
   expect(confirm).toHaveBeenCalled(); expect(store.visual.activePcb()!.layers).toHaveLength(8);
-  confirm.mockReturnValue(true); fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "4" } });
+  confirm.mockReturnValue(true); fireEvent.change(screen.getByRole("spinbutton", { name: "Copper layers" }), { target: { value: "4" } });
   expect(store.visual.activePcb()!.images[0].layerId).toBeUndefined();
 });
 it("groups opacity gestures in one undo entry and preserves image settings across save/reopen", async () => {
@@ -198,8 +199,24 @@ it("opens settings only in a modal and contains/restores keyboard focus", () => 
   fireEvent.click(settings); fireEvent.click(screen.getByRole("dialog").parentElement!);
   expect(screen.queryByRole("dialog")).toBeNull(); expect(document.activeElement).toBe(settings);
 });
-it("closes stale settings on PCB, workspace and project changes", async () => {
-  const { createSignal } = await import("solid-js");
+it("edits copper placement defaults from the settings modal and live-syncs them", () => {
+  store.visual.calibratePcb(10);
+  render(() => <VisualPanel store={store} active />);
+  fireEvent.click(screen.getByRole("button", { name: "Visual editor settings" }));
+  const dialog = screen.getByRole("dialog", { name: "Visual editor settings" });
+  const width = within(dialog).getByRole("spinbutton", { name: "Default trace width (mm)" });
+  fireEvent.change(width, { target: { value: "0.8" } });
+  expect(JSON.parse(localStorage.getItem("pcb-re-studio.copper-defaults")!)).toMatchObject({ traceWidthMm: 0.8 });
+  // Invalid entries revert instead of persisting: drill above diameter.
+  const drill = within(dialog).getByRole("spinbutton", { name: "Default via drill (mm)" });
+  fireEvent.change(drill, { target: { value: "5" } });
+  expect((drill as HTMLInputElement).value).toBe("0.5");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  // The placement parameters pick the new default up without a remount.
+  fireEvent.click(screen.getByRole("button", { name: "Place trace" }));
+  expect((screen.getByRole("spinbutton", { name: "Trace width (mm)" }) as HTMLInputElement).value).toBe("0.8");
+});
+it("closes stale settings on PCB, workspace and project changes", async () => {  const { createSignal } = await import("solid-js");
   const [active, setActive] = createSignal(true);
   render(() => <VisualPanel store={store} active={active()} />);
   const settings = screen.getByRole("button", { name: "Visual editor settings" });
@@ -473,4 +490,28 @@ it("keeps keyboard reorder and visibly marks a closed locked icon", async () => 
   expect(handle.hasAttribute("draggable")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Unlock First" }));
   expect(screen.getByRole("button", { name: "Lock First" }).classList.contains("is-locked")).toBe(false);
+});
+
+it("mirrors all photos, blocks locks, and cancels the existing-work warning", () => {
+  store.visual.addImage(store.visual.activePcb()!.id, asset, "Front", 100, 80);
+  store.visual.addImage(store.visual.activePcb()!.id, asset, "Back", 200, 120);
+  render(() => <VisualPanel store={store} active />);
+  const button = screen.getByRole("button", { name: "Mirror all photographs horizontally" });
+  fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+  fireEvent.click(button);
+  expect(screen.getByRole("button", { name: "Measure" }).getAttribute("aria-pressed")).toBe("false");
+  expect(store.visual.activePcb()!.images.every(image => image.warp?.a === -1)).toBe(true);
+  const second = store.visual.activePcb()!.images[1];
+  store.visual.updateImage(second.id, { locked: true, visible: false });
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(button.title).toContain("Unlock all");
+  store.visual.updateImage(second.id, { locked: false });
+  const pcb = structuredClone(JSON.parse(JSON.stringify(store.visual.activePcb()!)));
+  pcb.vias = [{ id: "via", x: 10, y: 10, diameter: 10, drill: 4 }];
+  store.visual.replacePcb(pcb);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  const before = JSON.stringify(store.doc());
+  fireEvent.click(button);
+  expect(confirm).toHaveBeenCalled();
+  expect(JSON.stringify(store.doc())).toBe(before);
 });

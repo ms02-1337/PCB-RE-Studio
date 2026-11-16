@@ -71,7 +71,7 @@ fn absolute(path: &str) -> ProjectResult<PathBuf> {
 }
 
 /// Staging directory under the app cache dir. A missing cache dir is a typed
-/// state error — never a silent `./pcb-re-studio/staging` in whatever happens
+/// state error - never a silent `./pcb-re-studio/staging` in whatever happens
 /// to be the current working directory.
 fn staging_path(app: &tauri::AppHandle) -> ProjectResult<PathBuf> {
     let dir = app.path().app_cache_dir().map_err(|_| {
@@ -541,7 +541,7 @@ mod tests {
         let staging = blockfile;
 
         // project_delete's ordering: remove the file, clear the open state,
-        // then clear staging best-effort — never the reverse, and a staging
+        // then clear staging best-effort - never the reverse, and a staging
         // failure never resurrects the deleted project as "open".
         let state = ProjectState::default();
         set_open(&state, Some(target.clone())).unwrap();

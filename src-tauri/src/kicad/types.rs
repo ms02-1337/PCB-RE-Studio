@@ -4,6 +4,10 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Graphic {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<FontSize>,
     pub kind: String,
     pub points: Vec<Point>,
     pub width: f64,
@@ -23,6 +27,8 @@ pub struct Drill {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pad {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<String>,
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     pub pad_type: Option<String>,
     pub number: String,
@@ -102,6 +108,8 @@ pub struct Terminal {
     pub net_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nc: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -171,4 +179,10 @@ pub struct SchematicDocument {
     pub units: Vec<SchematicUnit>,
     pub wires: Vec<SchematicWire>,
     pub labels: Vec<SchematicLabel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FontSize {
+    pub width: f64,
+    pub height: f64,
 }

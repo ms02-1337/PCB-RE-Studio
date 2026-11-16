@@ -725,7 +725,7 @@ describe("board transforms", () => {
     expect(store.doc()!.boards[0].flipH).toBe(false);
   });
 
-  it("clamps board scale to 10–800", async () => {
+  it("clamps board scale to 10-800", async () => {
     const { store, boardId } = await storeWithBoard();
     store.setBoardScale(boardId, 5);
     expect(store.doc()!.boards[0].scale).toBe(10);
@@ -909,7 +909,7 @@ describe("picture selection", () => {
     const id = store.doc()!.components[0].id;
     store.setSelectedId(id);
     expect(store.boardSelected()).toBe(false);
-    // An explicit null (empty-canvas click) does NOT reselect the picture —
+    // An explicit null (empty-canvas click) does NOT reselect the picture -
     // the canvas decides; the store setter only clears.
     store.setSelectedId(null);
     expect(store.boardSelected()).toBe(false);
@@ -933,7 +933,7 @@ describe("picture selection", () => {
 });
 
 describe("configureAutosave", () => {
-  it("clamps the delay into 500–60000ms", async () => {
+  it("clamps the delay into 500-60000ms", async () => {
     const { store, bridge } = makeStore();
     bridge.openProject.mockResolvedValue(loaded(seededDoc()));
     await store.openProject("C:\\p.pcbre");

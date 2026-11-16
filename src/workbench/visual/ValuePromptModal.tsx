@@ -4,7 +4,7 @@
 // the input, Enter confirms, Escape/backdrop cancels without committing,
 // focus restored to the invoking element, inline rejection of
 // non-numeric/non-positive input. While open it swallows Escape (the pending
-// tool gesture stays alive underneath — key events never reach the canvas
+// tool gesture stays alive underneath - key events never reach the canvas
 // because focus is inside the dialog subtree). The optional `skipLabel`
 // button calls onConfirm(0): the controller treats 0 as "skip this axis".
 
@@ -44,7 +44,7 @@ export function ValuePromptModal(props: ValuePromptModalProps) {
     restoreFocus();
   };
   return (
-    <div class="overlay" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+    <div class="overlay overlay--center" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
       <section class="palette ve-value-dialog" role="dialog" aria-modal="true" aria-label={props.title}
         onKeyDown={(event) => {
           if (event.key === "Escape") { event.preventDefault(); close(); return; }

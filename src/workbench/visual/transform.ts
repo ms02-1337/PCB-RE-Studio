@@ -270,6 +270,26 @@ export function levelLine(a: Point, b: Point): { deltaDeg: number; axis: "horizo
   };
 }
 
+/** Reflect the complete photo stack about its world-bounds center. */
+export function mirrorVisualImages(images: VisualImage[], axis: "horizontal" | "vertical"): VisualImage[] | null {
+  if (!images.length || images.some(image => image.locked)) return null;
+  const bounds = worldAabb(images);
+  const pivot = { x: bounds.left / 2 + bounds.right / 2, y: bounds.top / 2 + bounds.bottom / 2 };
+  const reflection: Warp2 = { a: axis === "horizontal" ? -1 : 1, b: 0, c: 0, d: axis === "vertical" ? -1 : 1 };
+  const result = images.map(image => {
+    const anchor = imageAnchor(image), crop = visualCropRect(image);
+    return { ...image,
+      x: pivot.x + reflection.a * (anchor.x - pivot.x) - crop.x - crop.w / 2,
+      y: pivot.y + reflection.d * (anchor.y - pivot.y) - crop.y - crop.h / 2,
+      warp: composeWarpLeft(image.warp ?? null, reflection),
+    };
+  });
+  return result.every(image => {
+    const w = image.warp;
+    return [image.x, image.y, w.a, w.b, w.c, w.d].every(Number.isFinite) && Math.abs(w.a * w.d - w.b * w.c) > 1e-9;
+  }) ? result : null;
+}
+
 // ---------------------------------------------------------------------------
 // Perspective (Deskew). P is the INNERMOST factor of the pipeline: it maps
 // original source px → straightened source px before crop/linear/anchor.

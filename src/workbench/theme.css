@@ -62,6 +62,10 @@ input {
   font: inherit;
   color: inherit;
 }
+input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]) {
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
 button {
   background: transparent;
   border: 1px solid var(--border);
@@ -80,6 +84,41 @@ button:disabled {
   opacity: 0.4;
   cursor: default;
 }
+/* Native dropdowns restyled to the app's control language: flat field,
+   hairline border, button-like radius and hover, and a stroke-line chevron
+   matching the ActionIcon glyphs (the platform arrow never matches). The
+   open list stays native - color-scheme plus the option colors below keep
+   it dark in WebView2 - so keyboard and overlay behavior come for free. */
+select:not([multiple]) {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a0a0a0' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 7px center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 24px 4px 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+/* Hover mirrors the button treatment; background-color only, so the
+   chevron image survives the state change. */
+select:not([multiple]):hover:not(:disabled) {
+  background-color: var(--raised);
+  border-color: var(--muted);
+}
+select:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+select option {
+  background: var(--surface);
+  color: var(--text);
+}
+/* Light theme swaps the chevron tint to its muted color. */
+.workbench[data-theme="light"] select:not([multiple]) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23616161' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
@@ -90,6 +129,7 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 138px;
   position: relative;
+  z-index: 30;
   align-items: stretch;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -105,7 +145,7 @@ button:disabled {
   min-width: 0;
   overflow: visible;
 }
-.title-tools button {
+.title-tools > button {
   flex: 0 0 36px;
   height: 34px;
   width: 36px;
@@ -132,12 +172,17 @@ button:disabled {
 .title-menus details {
   position: relative;
 }
+.title-menus details[open] {
+  z-index: 50;
+}
 .title-menus summary {
   list-style: none;
   cursor: pointer;
   padding: 7px 8px;
   height: 30px;
   line-height: 16px;
+  border-radius: 3px;
+  user-select: none;
 }
 .title-menus summary::-webkit-details-marker {
   display: none;
@@ -150,27 +195,69 @@ button:disabled {
   position: absolute;
   top: 32px;
   left: 0;
-  min-width: 185px;
-  max-height: min(60vh, 400px);
-  overflow: auto;
-  padding: 3px;
+  min-width: 190px;
+  width: max-content;
+  overflow: visible;
+  scrollbar-width: none;
+  padding: 4px;
   background: var(--raised);
   border: 1px solid var(--border);
-  box-shadow: 0 5px 18px var(--shadow);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px var(--shadow);
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  z-index: 100;
+}
+.title-menus [role="menu"]::-webkit-scrollbar {
+  display: none;
 }
 .title-menus [role="menuitem"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  flex: 0 0 auto;
+  box-sizing: border-box;
   text-align: left;
   white-space: nowrap;
-  min-height: 27px;
-  padding: 4px 8px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 8px;
   font-size: 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.title-menus [role="menuitem"] .action-icon {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.title-menus [role="menuitem"]:hover:not(:disabled),
+.title-menus [role="menuitem"]:focus-visible:not(:disabled),
+.title-menus [role="menuitem"]:focus:not(:disabled) {
+  background: var(--accent);
+  color: #181818;
+  outline: none;
+}
+.title-menus [role="menuitem"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--muted);
 }
 .menu-heading {
   color: var(--muted);
   font-size: 11px;
-  padding: 7px 10px 3px;
+  padding: 6px 8px 3px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+  user-select: none;
 }
 .window-title {
   position: absolute;
@@ -231,10 +318,21 @@ button:disabled {
   white-space: nowrap;
   font-size: 12px;
 }
+/* Hover lights only the bottom indicator edge; the separator border stays
+   quiet so the whole tab outline doesn't flash on mouse-over. */
+.workspace-tablist [role="tab"]:hover:not(:disabled):not([aria-selected="true"]) {
+  border-right-color: var(--border);
+  border-bottom-color: var(--muted);
+}
 .workspace-tablist [role="tab"][aria-selected="true"] {
   border-bottom-color: var(--indicator);
   background: var(--bg);
   color: var(--text);
+}
+.workspace-tablist [role="tab"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--muted);
 }
 /* Save-status badge at the tab row's right edge (last flex child). */
 .workspace-tabs .tab-save-badge {
@@ -424,15 +522,20 @@ h1 {
 .palette input {
   padding: 10px;
   background: var(--bg);
-  border: 1px solid var(--focus);
+  border: 1px solid var(--border);
   margin-bottom: 8px;
+}
+.palette input:focus,
+.palette input:focus-visible {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
 }
 .palette button {
   text-align: left;
 }
 .palette button:hover {
-  background: var(--accent);
-  color: #181818;
+  background: var(--raised);
+  color: var(--text);
 }
 @media (max-width: 900px) {
   .primary {
@@ -530,9 +633,6 @@ h1 {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.projects-stats {
-  color: var(--text);
-}
 .projects-actions {
   display: flex;
   flex-wrap: wrap;
@@ -572,16 +672,55 @@ h1 {
 .projects-card .projects-meta { gap: 8px; }
 .projects-card .projects-actions { gap: 10px; padding-top: 18px; border-top: 1px solid var(--border); }
 .projects-card .projects-actions button { padding: 7px 12px; font-size: 13px; }
-.project-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 4px 0; border: 1px solid var(--border); }
-.project-metrics > div { padding: 22px 18px; border-right: 1px solid var(--border); min-width: 0; }
-.project-metrics > div:last-child { border-right: 0; }
-.project-metrics dt { color: var(--muted); font-size: 12px; }
-.project-metrics dd { margin: 10px 0 0; font-size: clamp(22px, 3vw, 32px); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-@media (max-width: 800px) {
-  .project-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .project-metrics > div { border: 0; }
-  .project-metrics > div:nth-child(odd) { border-right: 1px solid var(--border); }
-  .project-metrics > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+.projects-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.projects-stats-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.projects-stats-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.project-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0;
+}
+.project-metrics > div {
+  background: var(--surface);
+  padding: 14px 16px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.project-metrics dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.project-metrics dd {
+  margin: 6px 0 0;
+  font-size: clamp(18px, 2.2vw, 24px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  color: var(--text);
 }
 .projects-error {
   margin: 0;
@@ -875,4 +1014,12 @@ h1 {
     flex-basis: 30px;
     width: 30px;
   }
+}
+
+/* Drawing surfaces retain keyboard input without framing the entire workspace. */
+.ve-canvas > canvas:focus,
+.ve-canvas > canvas:focus-visible,
+.canvas-wrap > canvas:focus,
+.canvas-wrap > canvas:focus-visible {
+  outline: none;
 }

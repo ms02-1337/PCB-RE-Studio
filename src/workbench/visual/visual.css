@@ -9,6 +9,10 @@
 .ve-resizer { flex:0 0 5px; cursor:col-resize; background:var(--border); }
 .ve-resizer:focus-visible { background:var(--accent); }
 .ve-layer-count { display:flex; gap:8px; align-items:center; padding:8px; }
+.ve-copper-defaults { display:flex; flex-direction:column; gap:2px; margin-top:14px; padding-top:10px; border-top:1px solid var(--border); }
+.ve-copper-defaults h3 { margin:0 0 6px; padding:0 8px; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.7px; color:var(--muted); }
+.ve-copper-defaults label { display:flex; gap:8px; align-items:center; justify-content:space-between; padding:6px 8px; }
+.ve-copper-defaults input[type="number"] { min-width:0; width:68px; }
 .ve-layer-count input { min-width:0; width:68px; }
 .ve-image-list { overflow:auto; overscroll-behavior:contain; padding:6px; flex:1; min-height:0; min-width:0; }
 .ve-image-card { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--border); padding:6px; margin-bottom:7px; background:var(--bg); border-radius:3px; }
@@ -33,7 +37,7 @@
 .ve-view-controls { position:absolute; left:8px; bottom:8px; display:flex; gap:4px; }
 .ve-view-controls button { background:var(--surface); }
 .ve-canvas-empty { position:absolute; inset:40% 15px auto; text-align:center; color:var(--muted); pointer-events:none; }
-.ve-tabs { display:flex; align-items:center; gap:4px; padding:4px 8px; border-top:1px solid var(--border); overflow-x:auto; scrollbar-width:thin; flex-shrink:0; }
+.ve-tabs { display:flex; align-items:center; gap:4px; padding:4px 8px; border-top:1px solid var(--border); overflow:hidden; flex-shrink:0; }
 .ve-tabs button { padding:3px 10px; font-size:12px; line-height:1.2; white-space:nowrap; }
 .ve-tabs button[aria-current=true] { border-color:var(--indicator); }
 .ve-error { margin:0; padding:6px; color:var(--danger); }
@@ -69,13 +73,763 @@
 .ve-value-error { color:var(--danger); margin:8px 0 0; font-size:12px; }
 .ve-value-confirm { background:var(--accent); color:#181818; border-color:var(--accent); }
 .ve-value-confirm:hover:not(:disabled) { background:color-mix(in srgb, var(--accent, #ffcd11) 88%, #fff); border-color:#fff; color:#181818; }
+
+/* Join connected nets dialog */
+.ve-join-dialog { width: min(520px, 92vw); max-width: 100%; }
+.ve-join-explanation { font-size: 13px; line-height: 1.5; color: var(--text); margin: 0 0 16px !important; }
+.ve-join-buttons { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.ve-join-net-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  gap: 4px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ve-join-net-btn:hover {
+  background: color-mix(in srgb, var(--accent, #ffcd11) 16%, var(--surface));
+  border-color: var(--accent, #ffcd11);
+  color: var(--text);
+}
+.palette .ve-join-net-btn:hover {
+  background: color-mix(in srgb, var(--accent, #ffcd11) 16%, var(--surface));
+  border-color: var(--accent, #ffcd11);
+  color: var(--text);
+}
+.palette .ve-join-net-btn:hover .ve-join-btn-arrow {
+  color: var(--accent, #ffcd11);
+}
+.palette .ve-join-net-btn:hover .ve-join-btn-desc {
+  color: var(--muted);
+}
+.palette .ve-join-net-btn:hover .ve-join-btn-desc strong {
+  color: var(--text);
+}
+.ve-join-btn-arrow {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--accent, #ffcd11);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ve-join-btn-desc {
+  font-size: 12px;
+  color: var(--muted);
+}
+.ve-join-btn-desc strong {
+  color: var(--text);
+}
+.ve-join-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.ve-join-divider::before,
+.ve-join-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+.ve-join-divider span {
+  padding: 0 10px;
+}
+.ve-join-custom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.ve-join-label-text {
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.ve-join-custom-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.ve-join-custom-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 0 !important;
+}
+.ve-join-custom-input:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.ve-join-custom-btn {
+  white-space: nowrap;
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.ve-join-custom-btn:hover:not(:disabled),
+.palette .ve-join-custom-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #ffcd11) 16%, var(--surface));
+  border-color: var(--accent);
+  color: var(--text);
+}
+.ve-join-custom-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .ve-copper-inspector { display: grid; gap: 12px; padding: 12px; overflow: auto; }
 .ve-copper-inspector label { display: grid; gap: 4px; }
 .ve-copper-inspector input, .ve-copper-inspector select { min-width: 0; width: 100%; }
+.ve-net-selector { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.ve-net-selector-header { display: flex; justify-content: space-between; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+.ve-net-current-badge { font-weight: 600; text-transform: none; letter-spacing: normal; color: var(--text); display: inline-flex; align-items: center; gap: 5px; }
+.ve-net-input-bar { display: flex; gap: 4px; align-items: center; position: relative; }
+.ve-net-input-bar input { flex: 1; min-width: 0; width: auto !important; height: 28px; padding: 4px 8px; font-size: 12px; }
+.ve-net-add-btn { flex: 0 0 28px; height: 28px; width: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; cursor: pointer; }
+.ve-net-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; margin-top: 3px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); box-shadow: 0 8px 24px var(--shadow); display: flex; flex-direction: column; padding: 3px; gap: 1px; }
+.ve-net-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; border: 0; background: transparent; color: var(--text); text-align: left; width: 100%; box-sizing: border-box; min-height: 25px; }
+.ve-net-item:hover { background: var(--raised); }
+.ve-net-item[data-selected="true"] { background: color-mix(in srgb, var(--accent, #ffcd11) 20%, transparent); font-weight: 600; }
+.ve-net-item[data-selected="true"]:hover { background: color-mix(in srgb, var(--accent, #ffcd11) 30%, transparent); }
+.ve-net-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0, 0, 0, 0.2); }
+.ve-net-dot.unassigned { background: var(--muted); opacity: 0.5; }
+.ve-net-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ve-net-check { font-size: 11px; color: var(--accent, #ffcd11); font-weight: bold; }
+.ve-net-empty { padding: 10px 8px; color: var(--muted); font-size: 11px; text-align: center; font-style: italic; }
 .ve-toolbar { flex-wrap: wrap; }
-.ve-nets { height: 100%; overflow: auto; padding: 16px; }
-.ve-nets > label, .ve-nets form { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
-.ve-net-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0; align-items: center; border-bottom: 1px solid var(--border); }
-.ve-net-row input[type="color"] { width: 34px; padding: 2px; }
+/* Nets panel layout */
+.ve-nets {
+  height: 100%;
+  overflow: auto;
+  padding: 16px 20px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ve-nets-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+}
+.ve-nets-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ve-nets-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.ve-nets-title-group h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+.ve-nets-count {
+  font-size: 13px;
+  color: var(--muted);
+}
+.ve-nets-pcb-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ve-nets-pcb-control label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ve-nets-pcb-select {
+  font-size: 14px;
+  height: 36px;
+  min-width: 180px;
+  padding: 6px 30px 6px 12px !important;
+  font-weight: 500;
+}
+.ve-nets-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ve-nets-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+  max-width: 400px;
+}
+.ve-nets-search label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ve-nets-search input {
+  flex: 1;
+  height: 32px;
+  font-size: 13px;
+}
+.ve-nets-create-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 320px;
+  justify-content: flex-end;
+}
+.ve-nets-create-form label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ve-nets-create-form input {
+  width: 180px;
+  height: 32px;
+  font-size: 13px;
+}
+.ve-nets-create-form button {
+  height: 32px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Nets Table */
+.ve-nets-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+.ve-nets-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.ve-nets-table th {
+  background: var(--raised);
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.ve-nets-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.ve-nets-table tr:last-child td {
+  border-bottom: 0;
+}
+.ve-nets-table tr:hover td {
+  background: color-mix(in srgb, var(--raised) 50%, transparent);
+}
+.ve-nets-table .col-color {
+  width: 44px;
+  text-align: center;
+}
+.ve-nets-table .col-color input[type="color"] {
+  width: 28px;
+  height: 24px;
+  padding: 1px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+}
+.ve-nets-table .col-name {
+  min-width: 160px;
+}
+.ve-net-title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  padding: 4px 6px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 3px;
+  font-weight: 500;
+  font-size: 13px;
+  text-align: left;
+}
+.ve-net-title-btn:hover {
+  background: var(--raised);
+  color: var(--accent);
+}
+.ve-net-name-label {
+  font-weight: 600;
+}
+.ve-net-pill {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--muted);
+  font-weight: normal;
+}
+.ve-nets-table .col-stat {
+  width: 60px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.ve-nets-table .col-merge {
+  width: 200px;
+}
+.ve-net-merge-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ve-net-merge-group select {
+  flex: 1;
+  height: 28px;
+  font-size: 12px;
+}
+.ve-net-merge-group button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.ve-nets-table .col-actions {
+  width: 240px;
+}
+.ve-net-actions-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ve-net-rename {
+  width: 110px;
+  height: 28px;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+.ve-net-actions-group button.danger {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ve-nets-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Net Elements Modal (standardized to TypeManager dialog pattern) */
+.palette.type-manager.ve-net-modal {
+  width: min(1200px, 95vw);
+  height: min(760px, calc(100dvh - 48px));
+  max-height: calc(100dvh - 48px);
+}
+.ve-net-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ve-net-modal-title h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.ve-net-count-pill {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 500;
+}
+.ve-net-elements-table {
+  width: 100%;
+}
+.ve-net-elements-table th.col-el-type,
+.ve-net-elements-table td.col-el-type {
+  width: 70px;
+  text-align: center;
+}
+.ve-net-elements-table th.col-el-name,
+.ve-net-elements-table td.col-el-name {
+  width: 440px;
+  min-width: 360px;
+  text-align: left;
+}
+.ve-net-elements-table th.col-el-layer,
+.ve-net-elements-table td.col-el-layer {
+  width: 120px;
+  text-align: left;
+}
+.ve-net-elements-table th.col-el-comment,
+.ve-net-elements-table td.col-el-comment {
+  width: 340px;
+  max-width: 380px;
+  text-align: left;
+}
+.ve-net-elements-table th.col-el-actions,
+.ve-net-elements-table td.col-el-actions {
+  width: 140px;
+  text-align: right;
+}
+.ve-element-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.ve-element-goto-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.ve-element-goto-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.type-manager .ve-element-comment {
+  width: 100%;
+  height: 26px;
+  font-size: 12px;
+  padding: 2px 8px;
+  box-sizing: border-box;
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  outline: none;
+  margin-bottom: 0;
+}
+.type-manager .ve-element-comment:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.ve-element-action-btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ve-element-action-btn:hover {
+  background: var(--accent);
+  color: #181818;
+}
+.ve-element-action-btn:hover {
+  background: var(--accent);
+  color: #181818;
+}
 .palette.component-manager, .component-manager{width:min(1013px,95vw);height:min(760px,88vh);min-height:min(420px,66vh);max-height:92vh;display:flex;flex-direction:column}.component-manager-body{display:grid;grid-template-columns:240px 1fr;flex:1;overflow:auto;min-height:0}.component-manager-body aside,.component-manager-body main{padding:12px;overflow:auto}.component-manager-body aside{border-right:1px solid var(--border)}.component-previews{display:flex;flex-wrap:wrap}.component-previews canvas{width:100%;max-width:400px;background:#202020}.component-fields{display:flex;gap:8px;flex-wrap:wrap}.component-fields label,.component-inspector label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.library-results{display:flex;flex-wrap:wrap;gap:4px;max-height:280px;overflow:auto}.component-manager table,.component-inspector table{width:100%;text-align:left}.component-manager input,.component-manager select{max-width:100%}.component-inspector{padding:12px;overflow:auto}
-.palette.component-manager, .component-manager{resize:both;min-width:min(680px,95vw);min-height:400px}.component-manager tr.selected{background:color-mix(in srgb,#ffcd11 20%,transparent)}
+.palette.component-manager, .component-manager{resize:none;min-width:min(680px,95vw);min-height:400px}.component-manager tr.selected{background:color-mix(in srgb,#ffcd11 20%,transparent)}
+
+/* Component library workspace */
+.palette.component-manager{width:min(1760px,calc(100vw - 48px));height:min(1000px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);min-height:0;min-width:0;overflow:hidden;resize:none}
+.component-manager .dialog-header,.component-manager .dialog-actions{flex-shrink:0}
+.component-manager-body{display:block;overflow:auto;min-height:0}
+.component-manager-body main,.component-configuration{padding:16px;min-width:0}
+.component-manager [hidden]{display:none!important}
+.component-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.component-browser{border-block:1px solid var(--border);padding-block:12px;margin-block:8px 16px}
+.component-browser-controls,.component-pagination,.library-source-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.component-browser-controls label{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
+.component-manager .library-results{display:block;max-height:200px;overflow:auto;margin-top:8px}
+.component-manager table,.library-source-table table{width:100%;border-collapse:collapse;text-align:left}
+.component-manager th,.component-manager td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+.library-source-table th,.library-source-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.component-manager th,.library-source-table th{position:sticky;top:0;background:var(--bg);z-index:1}
+.component-manager tbody tr:nth-child(even),.library-source-table tbody tr:nth-child(even){background:var(--surface)}
+.component-manager tr.selected{background:color-mix(in srgb,var(--accent,#ffcd11) 18%,transparent)}
+.component-pagination{justify-content:flex-end;margin-top:8px}
+.component-manager .component-previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.component-previews>div{min-width:0;border:1px solid var(--border);padding:10px}
+.component-manager .component-previews canvas{display:block;width:100%;max-width:none;aspect-ratio:400/220;background:var(--bg)}
+.component-previews h3{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.component-pin-table{max-height:240px;overflow:auto;border:1px solid var(--border)}
+.component-manager .component-configuration-button{margin-right:auto}
+.component-manager .dialog-actions{flex-wrap:wrap;gap:8px}
+.placement-reason{max-width:340px;font-size:12px}
+.library-source-table{overflow:auto;margin-block:16px}.library-source-path{overflow-wrap:anywhere;max-width:600px}
+@media(max-width:800px){.component-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.component-manager .dialog-actions{padding:8px}}
+
+.component-manager input,.component-manager select{border:1px solid var(--border);background:var(--bg);color:var(--text)}
+.component-manager input:focus-visible,.component-manager select:focus-visible{border-color:var(--focus);outline:2px solid var(--focus);outline-offset:1px}
+.component-browser-controls [role="tablist"]{display:flex;gap:4px}.component-browser-controls [aria-selected="true"]{border-color:var(--focus)}
+
+.palette.component-manager{width:calc(100vw - 48px)}
+.component-manager .component-browser-controls input{width:220px;max-width:260px;height:26px;min-height:26px;padding:2px 8px;margin:0;box-sizing:border-box;font-size:12px;line-height:normal;border-radius:3px}
+.component-browser-controls button,.component-browser-controls select{height:26px;min-height:26px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;border-radius:3px}
+.component-start{padding:28px;max-width:700px;margin:auto}.component-start button{margin:8px 12px 8px 0}
+.component-manager nav.component-steps {
+  display: flex;
+  flex-direction: row;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  gap: 24px;
+  padding: 12px 0;
+  margin: 0 0 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.component-manager .component-steps > span {
+  flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
+}
+.component-steps [aria-current="step"]{color:var(--text);font-weight:600;border-bottom:2px solid var(--focus);padding-bottom:6px}
+.component-save-status{padding:10px 16px;margin:8px 16px;background:rgba(46,160,67,.18);border:1px solid #3fb950;color:#3fb950;border-radius:4px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.component-save-status .action-icon{width:16px;height:16px;margin:0;vertical-align:middle;stroke:#3fb950}
+.component-save-status .component-return-btn{margin-left:auto;background:var(--surface,#1e1e1e);border:1px solid var(--border);color:var(--text);padding:4px 12px;font-size:12px;font-weight:500;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center}
+.component-save-status .component-return-btn:hover{background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
+
+/* Keep library content independent of the application-wide main flex layout. */
+.overlay > .palette.component-manager {
+  width: 90vw;
+  height: 90dvh;
+  max-width: 90vw;
+  max-height: 90dvh;
+  flex: 0 0 auto;
+  resize: none;
+}
+.component-manager .component-manager-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.component-manager .component-manager-body > main {
+  display: block;
+  flex: none;
+  height: auto;
+  overflow: visible;
+}
+.component-manager .library-results,
+.component-manager .component-pin-table {
+  max-height: none;
+  overflow: visible;
+}
+.component-manager .component-previews canvas {
+  height: 220px;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
+/* Library results scroll independently of the wizard previews and footer. */
+.component-manager .component-browser .library-results {
+  max-height: min(280px, 30dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.component-library-loading {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text);
+  background: var(--bg);
+}
+.component-library-loading > span:last-child { color: var(--muted); }
+.component-library-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: component-library-spin 0.9s linear infinite;
+}
+@keyframes component-library-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .component-library-spinner { animation: none; }
+}
+
+/* The wizard gives remaining space to previews; only result rows scroll. */
+.component-manager .component-manager-body{overflow:hidden}
+.component-manager .component-manager-body>main{display:flex;flex-direction:column;height:100%;min-height:0;box-sizing:border-box;overflow:hidden}
+.component-manager .component-steps{flex:0 0 auto;align-items:center;margin:0 0 10px;padding:8px 0;gap:16px}
+.component-step-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.component-manager .component-steps button.component-step-btn{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;padding:0 16px;font-size:12px;font-weight:500;line-height:normal;text-align:center;white-space:nowrap;box-sizing:border-box;border-radius:4px;cursor:pointer;transition:background-color .15s,border-color .15s,color .15s}
+.component-manager .component-steps button.component-step-back{background:var(--surface);border:1px solid var(--border);color:var(--text)}
+.component-manager .component-steps button.component-step-back:hover:not(:disabled){background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
+.component-manager .component-steps button.component-step-back:disabled{opacity:.4;cursor:not-allowed}
+.component-manager .component-steps button.component-step-next{background:var(--focus,#ffcd11);border:1px solid var(--focus,#ffcd11);color:#111111;font-weight:600}
+.component-manager .component-steps button.component-step-next:hover:not(:disabled){filter:brightness(1.12)}
+.component-manager .component-steps button.component-step-next:disabled{background:var(--surface);border-color:var(--border);color:var(--muted);cursor:not-allowed;filter:none}
+.component-manager .component-steps button.component-step-home{background:var(--surface);border:1px solid var(--border);color:var(--text)}
+.component-manager .component-steps button.component-step-home:hover:not(:disabled){background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
+.component-manager .component-fields{flex:0 0 auto}
+.component-manager .component-browser{display:flex;flex-direction:column;flex:0 1 30%;min-height:115px;max-height:32%;margin:10px 0 12px;padding:8px 0 8px;border-top:1px solid var(--border);overflow:hidden}
+.component-manager .component-browser-controls,.component-manager .component-pagination{flex:0 0 auto}
+.component-manager .component-browser-controls{padding:2px 0 6px;gap:16px;justify-content:flex-start}
+.component-manager .component-browser-controls h3{margin:4px 0;font-size:13px}
+.component-manager .component-browser .library-results{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;margin-top:6px}
+.component-manager .component-browser .component-library-loading{min-height:80px}
+.component-manager main[data-step="saved"] .component-browser{flex:1 1 auto;max-height:none}
+.component-preview-stage{display:flex;flex-direction:column;flex:1 1 0;min-height:0}
+.component-manager .component-previews{flex:1 1 0;min-height:180px;gap:12px}
+.component-manager .component-previews>div{display:flex;flex-direction:column;min-height:0}
+.component-manager .component-previews h3{flex:0 0 auto;font-size:13px;margin:0 0 8px}
+.component-preview-surface{position:relative;flex:1 1 0;min-height:0;overflow:hidden;background:var(--bg)}
+.component-manager .component-preview-surface canvas{position:absolute;inset:0;width:100%;height:100%;max-width:none;aspect-ratio:auto;object-fit:fill;touch-action:none}
+.component-preview-fit{position:absolute;right:6px;top:6px;z-index:1;padding:3px 8px}
+.component-manager .component-preview-stage>h3{flex:0 0 auto;margin:10px 0 6px;font-size:13px}
+.component-manager .component-pin-table{flex:0 1 26%;min-height:75px;max-height:200px;overflow:auto}
+.component-manager .component-configuration{height:100%;overflow:auto;box-sizing:border-box}
+@media(max-height:650px){
+ .component-manager .component-manager-body{overflow:auto}
+ .component-manager .component-manager-body>main{height:auto;min-height:570px;overflow:visible}
+ .component-manager .component-browser{flex:0 0 155px;max-height:155px}
+ .component-manager .component-previews{min-height:240px}
+ .component-preview-stage{min-height:240px}
+ .component-manager main[data-step="review"] .component-preview-stage{min-height:400px}
+ .component-manager .component-pin-table{max-height:160px}
+}
+
+/* User-adjustable creation browser / preview split. */
+.component-workspace{display:flex;flex-direction:column;flex:1 1 0;min-height:0}
+.component-workspace[data-resizable="true"]{min-height:328px}
+.component-manager .component-workspace[data-resizable="true"]>.component-browser{flex:0 0 var(--library-list-height);height:var(--library-list-height);min-height:120px;max-height:none;margin:10px 0 0;padding:8px 0 8px;border-top:1px solid var(--border);box-sizing:border-box}
+.component-list-splitter{height:8px;flex:0 0 8px;cursor:row-resize;touch-action:none;position:relative;background:var(--bg)}
+.component-list-splitter::after{content:"";position:absolute;left:0;right:0;top:3px;height:2px;background:var(--border)}
+.component-list-splitter:hover::after,.component-list-splitter:focus-visible::after{background:var(--focus)}
+.component-list-splitter:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.component-manager .component-browser table th,.component-manager .component-browser table td{padding:6px 12px;border-bottom:1px solid var(--border);vertical-align:middle;text-align:left}
+.component-manager .component-browser table th:last-child,.component-manager .component-browser table td:last-child{width:1%;white-space:nowrap;text-align:right}
+.component-row-actions{display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
+.component-row-actions button{flex:0 0 auto;width:auto;height:24px;min-height:24px;padding:0 8px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;text-align:center;box-sizing:border-box;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--text);cursor:pointer}
+.component-row-actions button:hover:not(:disabled){background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
+.component-row-actions button.component-action-icon-btn{width:24px;min-width:24px;height:24px;min-height:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer}
+.component-row-actions button.component-action-icon-btn .action-icon{margin:0;width:14px;height:14px;vertical-align:0}
+.component-row-actions button.component-action-icon-btn:hover:not(:disabled){background:rgba(255,85,85,.15);border-color:#ff5555;color:#ff5555}
+.component-row-actions button.component-action-icon-btn:disabled{opacity:.35;cursor:not-allowed;border-color:var(--border)}
+.component-workspace[data-resizable="true"]>.component-preview-stage{min-height:200px}
+@media(max-height:650px){.component-workspace[data-resizable="true"]{flex:0 0 auto;height:500px;min-height:328px}}
+
+.component-confirm-dialog{min-width:320px;max-width:440px;padding:18px 20px;background:var(--surface,#1e1e1e);border:1px solid var(--border);border-radius:6px;box-shadow:0 12px 32px rgba(0,0,0,.6)}
+.component-confirm-dialog .dialog-header h2{font-size:15px;font-weight:600;margin:0 0 8px;color:var(--text)}
+.component-confirm-dialog .dialog-content p{font-size:13px;color:var(--muted,#aaa);margin:0 0 16px;line-height:1.4}
+.component-confirm-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:10px;padding:0;background:transparent;border-top:0}
+.component-confirm-dialog .component-discard-btn{background:var(--danger,#e5484d);border:1px solid var(--danger,#e5484d);color:#fff;font-weight:500;border-radius:4px;padding:6px 14px;cursor:pointer;text-align:center}
+.component-confirm-dialog .component-discard-btn:hover{filter:brightness(1.12)}
+
+.library-source-field{display:flex;flex-direction:column;gap:6px;margin:14px 0;max-width:none}
+.library-path-label{font-size:12px;color:var(--muted)}
+.library-path-row{display:flex;align-items:center;gap:8px;width:100%}
+.library-path-row input{flex:1 1 auto;min-width:240px;max-width:520px;height:28px;padding:4px 8px;box-sizing:border-box}
+.library-path-row button{flex:0 0 auto;height:28px;min-height:28px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;box-sizing:border-box}
+
+/* Component inspector selection details */
+.component-inspector .ve-net-selector { margin: 8px 0; }
+.component-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.component-inspector-actions .component-nav-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.component-inspector-actions .component-lock-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.component-inspector-actions button.component-action-icon-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.component-inspector-actions button.component-action-icon-btn .action-icon {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  vertical-align: 0;
+}
+.component-inspector-actions button.component-action-icon-btn:hover:not(:disabled) {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--muted);
+}
+.component-inspector-actions button.component-action-icon-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 85, 85, 0.15);
+  border-color: #ff5555;
+  color: #ff5555;
+}
+.component-inspector-actions button.component-action-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: var(--border);
+}

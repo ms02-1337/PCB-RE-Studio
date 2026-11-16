@@ -55,7 +55,7 @@ function AboutDialog(props: {
   };
   return (
     <div
-      class="overlay"
+      class="overlay overlay--center"
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -93,12 +93,12 @@ function AboutDialog(props: {
         <div class="dialog-content">
           <p>{props.appInfo}</p>
         </div>
-        <div class="dialog-actions">
-          <button ref={closeButton} onClick={close}>
+        <footer class="type-dialog-footer">
+          <button ref={closeButton} class="type-close" onClick={close}>
             <ActionIcon name="Close" />
             Close
           </button>
-        </div>
+        </footer>
       </section>
     </div>
   );
@@ -106,6 +106,20 @@ function AboutDialog(props: {
 export default function App(props: { projectName?: string }) {
   const [status, setStatus] = createSignal("Ready"),
     [activeTab, setActiveTab] = createSignal(0);
+  onMount(() => {
+    const navigate = (event: Event) => {
+      const target = (event as CustomEvent<{ tab: number }>).detail?.tab;
+      if (
+        hasProject() &&
+        (target === 3 || target === 2 || target === 4 || target === 5)
+      )
+        setActiveTab(target);
+    };
+    window.addEventListener("electrical-navigate", navigate);
+    onCleanup(() =>
+      window.removeEventListener("electrical-navigate", navigate),
+    );
+  });
   const [theme, setTheme] = createSignal<Theme>(savedTheme());
   const [maximized, setMaximized] = createSignal(false);
   const [autosave, setAutosave] = createSignal(loadAutosaveSettings());
@@ -118,6 +132,12 @@ export default function App(props: { projectName?: string }) {
   const placement = createPlacementStore();
   const native = hasNativeWindow();
   const tabButtons: HTMLButtonElement[] = [];
+  const hasProject = () => Boolean(props.projectName || placement.doc());
+  createEffect(() => {
+    if (!hasProject() && activeTab() !== 0) {
+      setActiveTab(0);
+    }
+  });
   const projectTitle = () => props.projectName || placement.doc()?.name;
   /** Footer text: the canvas hover summary when present, else "Ready" with a
    * project open (save state lives only in the tab-row SaveBadge), else the
@@ -423,13 +443,13 @@ export default function App(props: { projectName?: string }) {
         </div>
         <div
           class="window-title"
-          title={`PCB RE Studio — ${projectTitle() || "No project open"}`}
+          title={`PCB RE Studio - ${projectTitle() || "No project open"}`}
           onMouseDown={(event) => {
             if (event.button === 0 && native)
               action(event.detail === 2 ? "toggleMaximize" : "startDragging");
           }}
         >
-          PCB RE Studio <span>— {projectTitle() || "No project open"}</span>
+          PCB RE Studio <span>- {projectTitle() || "No project open"}</span>
         </div>
         <div class="window-controls">
           <button
@@ -492,15 +512,23 @@ export default function App(props: { projectName?: string }) {
           role="tablist"
           aria-label="Workspace tabs"
           onKeyDown={(event) => {
+            const enabledIndices = tabs
+              .map((_, i) => i)
+              .filter((i) => i === 0 || hasProject());
+            const currentPos = enabledIndices.indexOf(activeTab());
+            if (currentPos === -1) return;
             const next =
               event.key === "ArrowRight"
-                ? (activeTab() + 1) % tabs.length
+                ? enabledIndices[(currentPos + 1) % enabledIndices.length]
                 : event.key === "ArrowLeft"
-                  ? (activeTab() + tabs.length - 1) % tabs.length
+                  ? enabledIndices[
+                      (currentPos + enabledIndices.length - 1) %
+                        enabledIndices.length
+                    ]
                   : event.key === "Home"
-                    ? 0
+                    ? enabledIndices[0]
                     : event.key === "End"
-                      ? tabs.length - 1
+                      ? enabledIndices.at(-1)!
                       : null;
             if (next !== null) {
               event.preventDefault();
@@ -514,21 +542,34 @@ export default function App(props: { projectName?: string }) {
           }}
         >
           <For each={tabs}>
-            {(name, index) => (
-              <button
-                ref={(element) => {
-                  tabButtons[index()] = element;
-                }}
-                role="tab"
-                id={`tab-${index()}`}
-                aria-selected={activeTab() === index()}
-                aria-controls={`panel-${index()}`}
-                tabIndex={activeTab() === index() ? 0 : -1}
-                onClick={() => setActiveTab(index())}
-              >
-                {name}
-              </button>
-            )}
+            {(name, index) => {
+              const isDisabled = () => index() !== 0 && !hasProject();
+              return (
+                <button
+                  ref={(element) => {
+                    tabButtons[index()] = element;
+                  }}
+                  role="tab"
+                  id={`tab-${index()}`}
+                  aria-selected={activeTab() === index()}
+                  aria-controls={`panel-${index()}`}
+                  disabled={isDisabled()}
+                  title={
+                    isDisabled()
+                      ? "Open or create a project to enable this tab"
+                      : undefined
+                  }
+                  tabIndex={activeTab() === index() ? 0 : -1}
+                  onClick={() => {
+                    if (!isDisabled()) {
+                      setActiveTab(index());
+                    }
+                  }}
+                >
+                  {name}
+                </button>
+              );
+            }}
           </For>
         </div>
         <SaveBadge store={placement} />
@@ -562,7 +603,13 @@ export default function App(props: { projectName?: string }) {
                                   fallback={
                                     <BomPanel
                                       store={placement}
-                                      onNavigate={componentId => {sessionStorage.setItem("electrical-navigation",JSON.stringify({componentId}));setActiveTab(2);}}
+                                      onNavigate={(componentId) => {
+                                        sessionStorage.setItem(
+                                          "electrical-navigation",
+                                          JSON.stringify({ componentId }),
+                                        );
+                                        setActiveTab(2);
+                                      }}
                                       onReplace={(ids) => {
                                         sessionStorage.setItem(
                                           "component-replace",
@@ -576,7 +623,13 @@ export default function App(props: { projectName?: string }) {
                                   <SchematicPanel
                                     store={placement}
                                     active={activeTab() === 3}
-                                    onNavigate={componentId => {sessionStorage.setItem("electrical-navigation",JSON.stringify({componentId}));setActiveTab(2);}}
+                                    onNavigate={(componentId) => {
+                                      sessionStorage.setItem(
+                                        "electrical-navigation",
+                                        JSON.stringify({ componentId }),
+                                      );
+                                      setActiveTab(2);
+                                    }}
                                     onReplace={(ids) => {
                                       sessionStorage.setItem(
                                         "component-replace",

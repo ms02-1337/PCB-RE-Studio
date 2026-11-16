@@ -1,4 +1,6 @@
-﻿import { createEffect, createSignal, createMemo, For, Show } from "solid-js";
+import { electricalMembers } from "../electrical/actions";
+import { padPoint } from "../electrical/domain";
+import { createEffect, createSignal, createMemo, For, Show } from "solid-js";
 import type { PlacementStore } from "../placement/store";
 import { ActionIcon } from "../ActionIcon";
 import type { Point } from "../placement/projectDoc";
@@ -9,10 +11,11 @@ import {
   type CopperTrace,
   type CopperZone,
   type CopperVia,
+  type PadAnchor,
 } from "./model";
 import {
+  openTraceEnds,
   area,
-  connected,
   copperIndex,
   distance,
   inside,
@@ -22,7 +25,9 @@ import {
   project,
   validPolygon,
   zoneCensus,
+  ncContacts,
 } from "./copper";
+import { loadCopperDefaults, type CopperDefaults } from "./defaults";
 
 type Element = CopperTrace | CopperZone | CopperVia;
 type Mode = "select" | "trace" | "zone" | "via";
@@ -34,16 +39,21 @@ export function createCopperEditor(
   placeComponent: () => void = () => {},
 ) {
   const pcb = store.visual.activePcb;
+  const openEnds = createMemo(() => pcb() ? openTraceEnds(pcb()!) : []);
   const spatial = createMemo(() => (pcb() ? copperIndex(pcb()!) : null));
   const [layer, setLayer] = createSignal("");
   const [mode, setMode] = createSignal<Mode>("select");
   const [selected, setSelected] = createSignal<string | null>(null);
   const [highlight, setHighlight] = createSignal("");
-  const [width, setWidth] = createSignal(0.5),
-    [diameter, setDiameter] = createSignal(1),
-    [drill, setDrill] = createSignal(0.5);
+  // Placement parameters start from the persisted user defaults; the
+  // settings modal can push new defaults mid-session (in-progress drafts
+  // already captured their width at start, so they are unaffected).
+  const initialDefaults = loadCopperDefaults();
+  const [width, setWidth] = createSignal(initialDefaults.traceWidthMm),
+    [diameter, setDiameter] = createSignal(initialDefaults.viaDiameterMm),
+    [drill, setDrill] = createSignal(initialDefaults.viaDrillMm);
   const [placementNet, setPlacementNet] = createSignal("");
-  const [angle, setAngle] = createSignal(false);
+  const [angle, setAngle] = createSignal(initialDefaults.route45);
   const [message, setMessage] = createSignal("");
   const [modal, setModal] = createSignal<{
     title: string;
@@ -55,6 +65,7 @@ export function createCopperEditor(
   } | null>(null);
   const [choice, setChoice] = createSignal(""),
     [netName, setNetName] = createSignal("");
+  let draftStartPad: PadAnchor | undefined, draftEndPad: PadAnchor | undefined;
   let points: Point[] = [],
     cursor: Point | null = null,
     draftLayer = "",
@@ -122,6 +133,7 @@ export function createCopperEditor(
             netId: string;
           };
           if (nav.pcbId === p?.id) {
+            setMode("select");
             if (nav.layerId && p.layers.includes(nav.layerId))
               setLayer(nav.layerId);
             setSelected(nav.elementId);
@@ -137,6 +149,24 @@ export function createCopperEditor(
   const copy = () => JSON.parse(JSON.stringify(pcb())) as VisualPcb;
   function commit(next: VisualPcb, seeds: string[], auto = false) {
     const previous = pcb();
+    for (const t of next.traces ?? [])
+      for (const [key, index] of [
+        ["startPad", 0],
+        ["endPad", t.points.length - 1],
+      ] as const) {
+        const anchor = t[key];
+        if (!anchor) continue;
+        const c = next.components?.find((c) => c.id === anchor.componentId),
+          p = c?.definition.footprint.pads.find(
+            (p) => p.number === anchor.terminal,
+          );
+        if (
+          !c ||
+          !p ||
+          distance(t.points[index], padPoint(c, p, next.pxPerMm ?? 1)) > 1e-5
+        )
+          delete t[key];
+      }
     if (!previous || previous.id !== next.id) return;
     const validNets = new Set(next.nets?.map((n) => n.id) ?? []);
     for (const e of [
@@ -145,7 +175,20 @@ export function createCopperEditor(
       ...(next.zones ?? []),
     ])
       if (e.netId && !validNets.has(e.netId)) delete e.netId;
-    const group = connected(next, seeds);
+    const previousNc = new Set(ncContacts(previous)),
+      newNc = ncContacts(next).filter((id) => !previousNc.has(id));
+    if (newNc.length) {
+      if (
+        !window.confirm(
+          `This edit contacts ${newNc.length} NC terminal(s). Clear NC and connect?`,
+        )
+      )
+        return;
+      for (const c of next.components ?? [])
+        for (const t of c.terminals)
+          if (newNc.includes(c.id + ":" + t.number)) t.nc = false;
+    }
+    const group = electricalMembers(next, seeds);
     const ids = [
       ...new Set(
         group.map((e) => e.netId).filter((id): id is string => Boolean(id)),
@@ -203,13 +246,13 @@ export function createCopperEditor(
         if (pcb() !== current) return;
         const next = copy();
         const net = name.trim()
-          ? (next.nets?.find((n) => n.name === name.trim()) ?? newNet(next, name))
+          ? (next.nets?.find((n) => n.name === name.trim()) ??
+            newNet(next, name))
           : next.nets?.find((n) => n.id === netId);
         next.zones!.find((z) => z.id === id)!.netId = net?.id;
         store.visual.replaceCopper(next.id, next);
       },
       () => {
-        // Cancelling the net prompt destroys the just-drawn zone.
         if (pcb() !== current) return;
         const next = copy();
         next.zones = next.zones?.filter((z) => z.id !== id);
@@ -244,14 +287,22 @@ export function createCopperEditor(
         points: clean,
         width: draftWidth,
         netId: draftNet || undefined,
+        startPad: draftStartPad,
+        endPad: draftEndPad,
       });
       cancel();
       commit(next, [id], true);
       setSelected(id);
     } else cancel();
   }
-  function snap(p: Point, scale: number, shift: boolean) {
-    if (shift) return { point: p, hit: false };
+  function snap(p: Point, scale: number, shift: boolean, excludeId?: string) {
+    if (shift)
+      return {
+        point: p,
+        hit: false,
+        anchor: undefined as PadAnchor | undefined,
+      };
+    let anchor: PadAnchor | undefined;
     let nearest = p,
       best = Infinity,
       hit = false;
@@ -261,12 +312,25 @@ export function createCopperEditor(
       top: p.y - 8 / scale,
       bottom: p.y + 8 / scale,
     }) ?? []) {
+      if (e.id === excludeId) continue;
+      if ("padTerminal" in e) {
+        if (e.layerId !== layer()) continue;
+        const d = distance(p, e.padCenter);
+        if ((inside(p, e.points) || d <= 8 / scale) && d < best) {
+          nearest = e.padCenter;
+          anchor = e.attachment;
+          best = d;
+          hit = true;
+        }
+        continue;
+      }
       if ("points" in e) {
         if (!("width" in e) || e.layerId !== layer()) continue;
         for (let i = 1; i < e.points.length; i++) {
           const q = project(p, e.points[i - 1], e.points[i]);
           const d = distance(p, q);
           if (d <= 8 / scale + e.width / 2 && d < best) {
+            anchor = undefined;
             nearest = q;
             best = d;
             hit = true;
@@ -275,13 +339,14 @@ export function createCopperEditor(
       } else {
         const d = distance(p, e);
         if (d <= Math.max(8 / scale, e.diameter / 2) && d < best) {
+          anchor = undefined;
           nearest = { x: e.x, y: e.y };
           best = d;
           hit = true;
         }
       }
     }
-    return { point: nearest, hit };
+    return { point: nearest, hit, anchor };
   }
   function hit(p: Point, scale: number) {
     return (
@@ -321,6 +386,9 @@ export function createCopperEditor(
       const e = hit(p, scale);
       setSelected(e?.id ?? null);
       if (!e) return false;
+      // Locked elements stay selectable (the inspector still offers net
+      // changes and unlocking) but never drag - body or vertex.
+      if (e.locked) return true;
       const vertex =
         "points" in e
           ? e.points.findIndex((q) => distance(p, q) < 8 / scale)
@@ -335,7 +403,9 @@ export function createCopperEditor(
     }
     if (!pcb()?.pxPerMm) return true;
     const s =
-      mode() === "zone" ? { point: p, hit: false } : snap(p, scale, shift);
+      mode() === "zone"
+        ? { point: p, hit: false, anchor: undefined }
+        : snap(p, scale, shift);
     if (angle() && points.length && mode() === "trace" && !s.hit) {
       const a = points.at(-1)!,
         ray =
@@ -345,6 +415,7 @@ export function createCopperEditor(
       const d = (p.x - a.x) * Math.cos(ray) + (p.y - a.y) * Math.sin(ray);
       s.point = { x: a.x + d * Math.cos(ray), y: a.y + d * Math.sin(ray) };
     }
+    draftEndPad = s.anchor;
     cursor = s.point;
     if (mode() === "via") {
       const next = copy(),
@@ -358,11 +429,12 @@ export function createCopperEditor(
         drill: drill() * unit,
         netId: placementNet() || undefined,
       });
-      commit(next, [id], true);
+      commit(next, [id]);
       setSelected(id);
       return true;
     }
     if (!points.length) {
+      draftStartPad = s.anchor;
       origin = pcb();
       draftLayer = layer();
       draftWidth = width() * pcb()!.pxPerMm!;
@@ -383,9 +455,15 @@ export function createCopperEditor(
     changed();
     return true;
   }
+  function snappedDrag(p: Point, scale: number, shift: boolean) {
+    if (!drag || drag.vertex < 0 || !("width" in drag.element)) return {point:p, anchor:undefined as PadAnchor | undefined};
+    const vertex = drag.element.points[drag.vertex];
+    const target = snap({x:vertex.x+p.x-drag.start.x,y:vertex.y+p.y-drag.start.y},scale,shift,drag.element.id);
+    return {point:{x:drag.start.x+target.point.x-vertex.x,y:drag.start.y+target.point.y-vertex.y},anchor:target.anchor};
+  }
   function move(p: Point, scale: number, shift: boolean) {
     if (drag) {
-      cursor = p;
+      cursor = snappedDrag(p, scale, shift).point;
       changed();
       return;
     }
@@ -407,8 +485,10 @@ export function createCopperEditor(
     }
     changed();
   }
-  function up(p: Point) {
+  function up(p: Point, scale = 1, shift = false) {
     if (!drag) return;
+    const snapped = snappedDrag(p, scale, shift);
+    p = snapped.point;
     const d = drag;
     drag = null;
     if (pcb() !== d.pcb) return;
@@ -436,6 +516,11 @@ export function createCopperEditor(
               if (distance(q, before) < 1e-8) {
                 q.x += dx;
                 q.y += dy;
+                const anchorKey = q === other.points[0] ? "startPad" : q === other.points[other.points.length-1] ? "endPad" : undefined;
+                if (anchorKey) {
+                  if (snapped.anchor) (other as CopperTrace)[anchorKey] = {...snapped.anchor};
+                  else delete (other as CopperTrace)[anchorKey];
+                }
               }
         if (!("width" in e))
           e.points[d.vertex] = { x: before.x + dx, y: before.y + dy };
@@ -460,6 +545,10 @@ export function createCopperEditor(
   const remove = () => {
     const e = element();
     if (!e) return;
+    if (e.locked) {
+      setMessage("Element is locked; unlock it to delete.");
+      return;
+    }
     const next = copy();
     next.traces = next.traces?.filter((x) => x.id !== e.id);
     next.vias = next.vias?.filter((x) => x.id !== e.id);
@@ -479,7 +568,12 @@ export function createCopperEditor(
     change(target);
     commit(next, [e.id]);
   }
-  function draw(ctx: CanvasRenderingContext2D, scale: number) {
+  function draw(
+    ctx: CanvasRenderingContext2D,
+    scale: number,
+    offset?: { ids: Set<string>; dx: number; dy: number },
+    selectedIds?: Set<string>,
+  ) {
     const p = pcb();
     if (!p) return;
     const color = (e: Element) =>
@@ -491,12 +585,16 @@ export function createCopperEditor(
     ]) {
       if ("points" in e && e.layerId !== layer()) continue;
       ctx.save();
-      if (drag?.element.id === e.id && cursor) {
+      const isMoved = Boolean(offset?.ids.has(e.id));
+      if (isMoved && (offset?.dx || offset?.dy)) {
+        ctx.translate(offset.dx, offset.dy);
+      } else if (drag?.element.id === e.id && cursor) {
         if (!("points" in e) || drag.vertex < 0)
           ctx.translate(cursor.x - drag.start.x, cursor.y - drag.start.y);
       }
       if (highlight() && e.netId !== highlight()) ctx.globalAlpha = 0.2;
-      ctx.strokeStyle = selected() === e.id ? "#ffcd11" : color(e);
+      const isSel = selected() === e.id || Boolean(selectedIds?.has(e.id));
+      ctx.strokeStyle = isSel ? "#ffcd11" : color(e);
       ctx.fillStyle = color(e);
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -525,7 +623,7 @@ export function createCopperEditor(
           if (!e.netId) ctx.setLineDash([5 / scale, 4 / scale]);
           ctx.stroke();
         }
-        if (selected() === e.id) {
+        if (isSel) {
           ctx.setLineDash([]);
           ctx.fillStyle = "#ffcd11";
           for (const q of e.points)
@@ -540,6 +638,34 @@ export function createCopperEditor(
         ctx.arc(e.x, e.y, (e.diameter + e.drill) / 4, 0, Math.PI * 2);
         ctx.lineWidth = (e.diameter - e.drill) / 2;
         ctx.stroke();
+        if (isSel) {
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, e.diameter / 2 + 2 / scale, 0, Math.PI * 2);
+          ctx.strokeStyle = "#ffcd11";
+          ctx.lineWidth = 1.5 / scale;
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+      const box = elementBox(e);
+      if (isMoved && (offset?.dx || offset?.dy)) {
+        box.x += offset.dx;
+        box.y += offset.dy;
+      }
+      if (e.locked) drawLock(ctx, scale, box);
+    }
+    // Screen-sized rings stay readable at every zoom. Suppress stale draft positions.
+    if (!drag && !offset?.dx && !offset?.dy) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#ff5555";
+      ctx.lineWidth = 2 / scale;
+      ctx.setLineDash([]);
+      for (const end of openEnds()) {
+        if (end.layerId !== layer()) continue;
+        ctx.beginPath();
+        ctx.arc(end.point.x, end.point.y, 4 / scale, 0, Math.PI * 2);
+        ctx.stroke();
       }
       ctx.restore();
     }
@@ -549,12 +675,14 @@ export function createCopperEditor(
       ctx.lineWidth = mode() === "trace" ? draftWidth : 1.5 / scale;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
+      if (mode() === "zone") ctx.setLineDash([5 / scale, 4 / scale]);
       ctx.beginPath();
       [...points, ...(cursor ? [cursor] : [])].forEach((q, i) =>
         i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y),
       );
       if (mode() === "zone") {
-        // Zones preview their fill while being drawn, like committed zones.
+        // Zones preview their fill while being drawn, like committed zones;
+        // the border stays dashed until the zone is committed.
         ctx.closePath();
         ctx.fillStyle = "#ffcd11";
         ctx.globalAlpha = 0.22;
@@ -562,8 +690,25 @@ export function createCopperEditor(
         ctx.globalAlpha = 1;
       }
       ctx.stroke();
+      if (mode() === "zone") {
+        // Corner circles appear on every placed vertex while drawing, not
+        // only on the selected committed zone afterwards.
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#ffcd11";
+        for (const q of points) {
+          ctx.beginPath();
+          ctx.arc(q.x, q.y, 3.5 / scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       ctx.restore();
-    } else if (enabled() && (mode() === "via" || mode() === "trace") && cursor && !drag && !modal()) {
+    } else if (
+      enabled() &&
+      (mode() === "via" || mode() === "trace") &&
+      cursor &&
+      !drag &&
+      !modal()
+    ) {
       // Transparent placement preview riding the cursor until the next click;
       // committed elements keep their real (net) colors.
       const unit = p.pxPerMm;
@@ -590,18 +735,199 @@ export function createCopperEditor(
       }
     }
   }
-  const netSelect = (value: () => string, change: (id: string) => void) => (
-    <select
-      aria-label="Net"
-      value={value()}
-      onChange={(e) => change(e.currentTarget.value)}
-    >
-      <option value="">Unassigned / automatic</option>
-      <For each={pcb()?.nets}>
-        {(n) => <option value={n.id}>{n.name}</option>}
-      </For>
-    </select>
-  );
+  const NetSelector = (props: {
+    value: () => string;
+    onChange: (id: string) => void;
+    onAdd: (name: string) => void;
+    disabled?: boolean;
+  }) => {
+    const [open, setOpen] = createSignal(false);
+    const [filter, setFilter] = createSignal("");
+    const nets = () => pcb()?.nets ?? [];
+    const currentNet = () => nets().find((n) => n.id === props.value());
+    const filteredNets = () => {
+      const q = filter().trim().toLowerCase();
+      if (!q) return nets();
+      return nets().filter((n) => n.name.toLowerCase().includes(q));
+    };
+
+    const handleAdd = () => {
+      const val = filter().trim();
+      if (!val) return;
+      props.onAdd(val);
+      setFilter("");
+      setOpen(false);
+    };
+
+    return (
+      <div class="ve-net-selector">
+        <div class="ve-net-selector-header">
+          <span>Net</span>
+          <span class="ve-net-current-badge">
+            <Show
+              when={currentNet()}
+              fallback={<span class="muted">Unassigned</span>}
+            >
+              {(net) => (
+                <>
+                  <span
+                    class="ve-net-dot"
+                    style={{ background: net().color }}
+                    aria-hidden="true"
+                  />
+                  {net().name}
+                </>
+              )}
+            </Show>
+          </span>
+        </div>
+        <div class="ve-net-input-bar">
+          <input
+            type="text"
+            role="combobox"
+            aria-label="Net"
+            aria-expanded={open()}
+            aria-autocomplete="list"
+            disabled={props.disabled}
+            placeholder={currentNet() ? currentNet()!.name : "Assign net…"}
+            value={open() ? filter() : (currentNet()?.name ?? "")}
+            onClick={() => {
+              if (!open()) {
+                setOpen(true);
+                setFilter("");
+              }
+            }}
+            onFocus={() => {
+              if (!open()) {
+                setOpen(true);
+                setFilter("");
+              }
+            }}
+            onInput={(e) => {
+              setFilter(e.currentTarget.value);
+              if (!open()) setOpen(true);
+            }}
+            onChange={(e) => {
+              const val = e.currentTarget.value.trim();
+              if (!val || val.toLowerCase() === "unassigned") {
+                props.onChange("");
+                setOpen(false);
+                setFilter("");
+                return;
+              }
+              const match = nets().find(
+                (n) =>
+                  n.id === val || n.name.toLowerCase() === val.toLowerCase(),
+              );
+              if (match) {
+                props.onChange(match.id);
+                setOpen(false);
+                setFilter("");
+              } else {
+                props.onAdd(val);
+                setOpen(false);
+                setFilter("");
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const val = filter().trim();
+                if (!val || val.toLowerCase() === "unassigned") {
+                  props.onChange("");
+                  setOpen(false);
+                  setFilter("");
+                  return;
+                }
+                const match = nets().find(
+                  (n) =>
+                    n.id === val || n.name.toLowerCase() === val.toLowerCase(),
+                );
+                if (match) {
+                  props.onChange(match.id);
+                  setOpen(false);
+                  setFilter("");
+                } else {
+                  handleAdd();
+                }
+              } else if (e.key === "Escape") {
+                setOpen(false);
+                setFilter("");
+              }
+            }}
+            onBlur={() => {
+              window.setTimeout(() => {
+                if (open()) {
+                  setOpen(false);
+                  setFilter("");
+                }
+              }, 150);
+            }}
+          />
+          <button
+            type="button"
+            class="ve-net-add-btn"
+            aria-label="Add net"
+            title="Add net"
+            disabled={props.disabled || !filter().trim()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleAdd}
+          >
+            +
+          </button>
+        </div>
+        <Show when={open()}>
+          <div class="ve-net-dropdown" role="listbox" aria-label="Nets list">
+            <button
+              type="button"
+              class="ve-net-item"
+              data-selected={!props.value()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                props.onChange("");
+                setOpen(false);
+                setFilter("");
+              }}
+            >
+              <span class="ve-net-dot unassigned" aria-hidden="true" />
+              <span class="ve-net-item-name">Unassigned</span>
+              <Show when={!props.value()}>
+                <span class="ve-net-check">✓</span>
+              </Show>
+            </button>
+            <For each={filteredNets()}>
+              {(n) => (
+                <button
+                  type="button"
+                  class="ve-net-item"
+                  data-selected={n.id === props.value()}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    props.onChange(n.id);
+                    setOpen(false);
+                    setFilter("");
+                  }}
+                >
+                  <span
+                    class="ve-net-dot"
+                    style={{ background: n.color }}
+                    aria-hidden="true"
+                  />
+                  <span class="ve-net-item-name">{n.name}</span>
+                  <Show when={n.id === props.value()}>
+                    <span class="ve-net-check">✓</span>
+                  </Show>
+                </button>
+              )}
+            </For>
+            <Show when={filteredNets().length === 0 && filter().trim()}>
+              <div class="ve-net-empty">No matching nets</div>
+            </Show>
+          </div>
+        </Show>
+      </div>
+    );
+  };
   const Toolbar = () => (
     <>
       <label>
@@ -673,7 +999,25 @@ export function createCopperEditor(
         fallback={
           <Show when={mode() !== "select"}>
             <p>New {mode()}</p>
-            {netSelect(placementNet, setPlacementNet)}
+            <NetSelector
+              value={placementNet}
+              onChange={setPlacementNet}
+              onAdd={(name) => {
+                const next = copy();
+                next.nets ??= [];
+                const trimmed = name.trim();
+                let net = trimmed
+                  ? next.nets.find(
+                      (n) => n.name.toLowerCase() === trimmed.toLowerCase(),
+                    )
+                  : undefined;
+                if (!net) {
+                  net = newNet(next, trimmed || undefined);
+                  store.visual.replaceCopper(next.id, next);
+                }
+                setPlacementNet(net.id);
+              }}
+            />
             <label>
               Trace width (mm)
               <input
@@ -727,19 +1071,61 @@ export function createCopperEditor(
           <>
             <p>
               {"width" in e ? "Trace" : "points" in e ? "Zone" : "Through via"}
+              {e.locked ? " (locked)" : ""}
             </p>
-            {netSelect(
-              () => e.netId ?? "",
-              (id) =>
+            <button
+              aria-label={e.locked ? "Unlock element" : "Lock element"}
+              aria-pressed={e.locked}
+              title={
+                e.locked
+                  ? "Unlock structure editing"
+                  : "Lock structure: no move, layer, size or delete; net stays editable"
+              }
+              onClick={() =>
+                patch((target) => {
+                  target.locked = !target.locked;
+                })
+              }
+            >
+              <ActionIcon name={e.locked ? "Unlock" : "Lock"} />
+              {e.locked ? "Unlock" : "Lock"}
+            </button>
+            <NetSelector
+              value={() => e.netId ?? ""}
+              onChange={(id) =>
                 patch((target) => {
                   target.netId = id || undefined;
-                }),
-            )}
+                })
+              }
+              onAdd={(name) => {
+                const next = copy();
+                next.nets ??= [];
+                const trimmed = name.trim();
+                let net = trimmed
+                  ? next.nets.find(
+                      (n) => n.name.toLowerCase() === trimmed.toLowerCase(),
+                    )
+                  : undefined;
+                if (!net) {
+                  net = newNet(next, trimmed || undefined);
+                }
+                const target = [
+                  ...(next.traces ?? []),
+                  ...(next.vias ?? []),
+                  ...(next.zones ?? []),
+                ].find((x) => x.id === e.id);
+                if (target) {
+                  target.netId = net.id;
+                }
+                commit(next, [e.id]);
+              }}
+            />
             <Show when={"points" in e}>
               <label>
                 Layer
                 <select
                   aria-label="Element layer"
+                  disabled={e.locked}
                   value={"points" in e ? e.layerId : ""}
                   onChange={(ev) =>
                     patch((target) => {
@@ -765,6 +1151,7 @@ export function createCopperEditor(
                   type="number"
                   min="0.001"
                   step="0.1"
+                  disabled={e.locked}
                   value={"width" in e ? e.width / (pcb()?.pxPerMm ?? 1) : 0}
                   onChange={(ev) => {
                     const v = +ev.currentTarget.value;
@@ -790,6 +1177,7 @@ export function createCopperEditor(
                 <input
                   type="number"
                   min="0.001"
+                  disabled={e.locked}
                   value={
                     !("points" in e) ? e.diameter / (pcb()?.pxPerMm ?? 1) : 0
                   }
@@ -807,6 +1195,7 @@ export function createCopperEditor(
                 <input
                   type="number"
                   min="0.001"
+                  disabled={e.locked}
                   value={!("points" in e) ? e.drill / (pcb()?.pxPerMm ?? 1) : 0}
                   onChange={(ev) => {
                     const v = +ev.currentTarget.value * pcb()!.pxPerMm!;
@@ -842,7 +1231,13 @@ export function createCopperEditor(
                 enclosed/intersecting
               </p>
             </Show>
-            <button onClick={remove}>Delete element</button>
+            <button
+              onClick={remove}
+              disabled={e.locked}
+              title={e.locked ? "Element is locked" : undefined}
+            >
+              Delete element
+            </button>
           </>
         )}
       </Show>
@@ -857,18 +1252,38 @@ export function createCopperEditor(
           state.cancel?.();
           restore?.focus();
         };
+        const isJoin = state.title.startsWith("Join");
+        const executeJoin = (targetNetId: string, customName: string) => {
+          const trimmed = customName.trim();
+          if (
+            trimmed &&
+            pcb()?.nets?.some(
+              (n) =>
+                n.id !== targetNetId &&
+                !state.choices.some((c) => c.id === n.id) &&
+                n.name === trimmed,
+            )
+          ) {
+            setMessage("Net name already exists.");
+            return;
+          }
+          setModal(null);
+          state.confirm(targetNetId, trimmed);
+          restore?.focus();
+        };
         return (
           <div
-            class="overlay"
+            class="overlay overlay--center"
             onClick={(e) => {
               if (e.target === e.currentTarget) close();
             }}
           >
             <section
-              class="palette ve-value-dialog"
+              class={`palette ve-value-dialog ${isJoin ? "ve-join-dialog" : ""}`}
               role="dialog"
               aria-modal="true"
               aria-label={state.title}
+              tabIndex={-1}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.stopPropagation();
@@ -877,9 +1292,10 @@ export function createCopperEditor(
                 if (e.key === "Tab") {
                   const items = Array.from(
                     e.currentTarget.querySelectorAll<HTMLElement>(
-                      "input,select,button",
+                      "input:not([disabled]),select:not([disabled]),button:not([disabled])",
                     ),
                   );
+                  if (items.length === 0) return;
                   if (!e.shiftKey && document.activeElement === items.at(-1)) {
                     e.preventDefault();
                     items[0]?.focus();
@@ -896,7 +1312,7 @@ export function createCopperEditor(
               </header>
               <div class="dialog-content">
                 <Show when={message()}>
-                  <p role="alert">{message()}</p>
+                  <p role="alert" class="ve-value-error">{message()}</p>
                 </Show>
                 <Show
                   when={!state.title.startsWith("Place component")}
@@ -906,52 +1322,106 @@ export function createCopperEditor(
                     </p>
                   }
                 >
-                  <label>
-                    Net
-                    <select
-                      autofocus
-                      value={choice()}
-                      onChange={(e) => setChoice(e.currentTarget.value)}
-                    >
-                      <option value="">Unassigned</option>
+                  <Show
+                    when={isJoin}
+                    fallback={
+                      <>
+                        <label class="ve-value-field">
+                          <span class="ve-join-label-text">Net</span>
+                          <select
+                            value={choice()}
+                            onChange={(e) => setChoice(e.currentTarget.value)}
+                          >
+                            <option value="">Unassigned</option>
+                            <For each={state.choices}>
+                              {(n) => <option value={n.id}>{n.name}</option>}
+                            </For>
+                          </select>
+                        </label>
+                        <label class="ve-value-field" style={{ "margin-top": "14px" }}>
+                          <span class="ve-join-label-text">New name (optional)</span>
+                          <input
+                            value={netName()}
+                            onInput={(e) => setNetName(e.currentTarget.value)}
+                          />
+                        </label>
+                      </>
+                    }
+                  >
+                    <p class="ve-join-explanation">
+                      Connecting these elements joins assigned nets. Select which net should survive for all connected elements, or merge them into a custom net name:
+                    </p>
+                    <div class="ve-join-buttons">
                       <For each={state.choices}>
-                        {(n) => <option value={n.id}>{n.name}</option>}
+                        {(net) => {
+                          const others = state.choices
+                            .filter((c) => c.id !== net.id)
+                            .map((c) => c.name)
+                            .join(", ");
+                          return (
+                            <button
+                              type="button"
+                              class="ve-join-net-btn"
+                              onClick={() => executeJoin(net.id, "")}
+                            >
+                              <span class="ve-join-btn-arrow">
+                                {others} → {net.name}
+                              </span>
+                              <span class="ve-join-btn-desc">
+                                Keep <strong>{net.name}</strong> (merge {others} into it)
+                              </span>
+                            </button>
+                          );
+                        }}
                       </For>
-                    </select>
-                  </label>
-                  <label>
-                    New name (optional)
-                    <input
-                      value={netName()}
-                      onInput={(e) => setNetName(e.currentTarget.value)}
-                    />
-                  </label>
+                    </div>
+                    <div class="ve-join-divider">
+                      <span>or merge into a custom net</span>
+                    </div>
+                    <label class="ve-join-custom-field">
+                      <span class="ve-join-label-text">New net name (optional)</span>
+                      <div class="ve-join-custom-row">
+                        <input
+                          type="text"
+                          class="ve-join-custom-input"
+                          placeholder="e.g. CUSTOM_NET"
+                          value={netName()}
+                          onInput={(e) => setNetName(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              executeJoin(choice() || state.choices[0]?.id, netName());
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          class="ve-join-custom-btn"
+                          disabled={!netName().trim()}
+                          onClick={() => {
+                            executeJoin(choice() || state.choices[0]?.id, netName());
+                          }}
+                        >
+                          {state.choices.length === 2
+                            ? `${state.choices[0].name} & ${state.choices[1].name} → ${netName().trim() || "Custom"}`
+                            : `Merge into "${netName().trim() || "Custom"}"`}
+                        </button>
+                      </div>
+                    </label>
+                  </Show>
                 </Show>
               </div>
               <footer class="dialog-actions">
-                <button autofocus onClick={close}>
+                <button type="button" onClick={close}>
                   Cancel
                 </button>
                 <Show when={!state.title.startsWith("Place component")}>
                   <button
-                    disabled={state.title.startsWith("Join") && !choice()}
+                    type="button"
+                    class="ve-value-confirm"
+                    disabled={isJoin && !choice() && !state.choices[0]?.id}
                     onClick={() => {
-                      if (
-                        state.title.startsWith("Join") &&
-                        netName().trim() &&
-                        pcb()?.nets?.some(
-                          (n) =>
-                            n.id !== choice() &&
-                            !state.choices.some((c) => c.id === n.id) &&
-                            n.name === netName().trim(),
-                        )
-                      ) {
-                        setMessage("Net name already exists.");
-                        return;
-                      }
-                      setModal(null);
-                      state.confirm(choice(), netName());
-                      restore?.focus();
+                      executeJoin(choice() || state.choices[0]?.id, netName());
                     }}
                   >
                     Confirm
@@ -964,11 +1434,21 @@ export function createCopperEditor(
       }}
     </Show>
   );
+  /** Applies new persisted defaults to the placement parameters; drafts that
+   * already started keep the values captured at their first click. */
+  function applyDefaults(defaults: CopperDefaults) {
+    setWidth(defaults.traceWidthMm);
+    setDiameter(defaults.viaDiameterMm);
+    setDrill(defaults.viaDrillMm);
+    setAngle(defaults.route45);
+  }
   return {
     layer,
     selectLayer: setActiveLayer,
     mode,
     selected,
+    setSelected: (id: string | null) => setSelected(id),
+    hit: (p: Point, scale: number) => hit(p, scale),
     Toolbar,
     Inspector,
     Dialog,
@@ -979,6 +1459,7 @@ export function createCopperEditor(
     cancel,
     finish,
     remove,
+    applyDefaults,
     key: (key: string) => {
       if (key === "Escape") {
         const handled = points.length > 0 || Boolean(selected());
@@ -1004,7 +1485,53 @@ export function createCopperEditor(
     },
   };
 }
+/** World-space bbox of a copper element (traces/zones by points, vias by
+ * diameter). */
+function elementBox(e: Element): { x: number; y: number; w: number; h: number } {
+  if ("points" in e) {
+    const xs = e.points.map((q) => q.x);
+    const ys = e.points.map((q) => q.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  }
+  return {
+    x: e.x - e.diameter / 2,
+    y: e.y - e.diameter / 2,
+    w: e.diameter,
+    h: e.diameter,
+  };
+}
+
+/** Screen-constant padlock at the element's top-right corner - the same
+ * double-stroked glyph as the placement stage (dark halo pass, then light
+ * stroke), with sizes divided by the view scale. */
+function drawLock(
+  ctx: CanvasRenderingContext2D,
+  scale: number,
+  box: { x: number; y: number; w: number; h: number },
+): void {
+  const width = 11 / scale;
+  const height = 10 / scale;
+  const left = box.x + box.w - width - 6 / scale;
+  const top = box.y + 3 / scale;
+  const bodyTop = top + height * 0.45;
+  const radius = width * 0.28;
+  const centerX = left + width / 2;
+  const passes: Array<[string, number]> = [
+    ["#111827", 4 / scale],
+    ["#f9fafb", 1.5 / scale],
+  ];
+  for (const [color, lineWidth] of passes) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.arc(centerX, bodyTop, radius, Math.PI, 0);
+    ctx.moveTo(left, bodyTop);
+    ctx.rect(left, bodyTop, width, height * 0.55);
+    ctx.stroke();
+  }
+}
+
 export type CopperEditor = ReturnType<typeof createCopperEditor>;
-
-
-

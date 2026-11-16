@@ -189,8 +189,8 @@ it("boardbar lists boards, switches, renames, and deletes with confirm", async (
   expect(screen.queryByText(/images/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add mapping tab" }));
   const secondTab = store.activeMappingTab()!.id;
-  const front = screen.getByTitle(/Front — double-click/);
-  const back = screen.getByTitle(/Board 2 — double-click/);
+  const front = screen.getByTitle(/Front - double-click/);
+  const back = screen.getByTitle(/Board 2 - double-click/);
   // Active board is conveyed by aria-current only (aria-pressed dropped).
   expect(front.getAttribute("aria-current")).toBeNull();
   expect(back.getAttribute("aria-current")).toBe("true");
@@ -206,7 +206,7 @@ it("boardbar lists boards, switches, renames, and deletes with confirm", async (
 
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   expect(screen.queryByLabelText("Delete mapping tab Top")).toBeNull();
-  fireEvent.contextMenu(screen.getByTitle(/Top — double-click/));
+  fireEvent.contextMenu(screen.getByTitle(/Top - double-click/));
   fireEvent.click(screen.getByRole("menuitem", { name: "Delete tab" }));
   expect(confirm).toHaveBeenCalledWith("Delete mapping tab 'Top' and its images and components?");
   await waitFor(() => expect(store.doc()?.boards).toHaveLength(0));

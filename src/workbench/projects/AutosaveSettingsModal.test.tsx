@@ -73,7 +73,7 @@ it("seeds autosave fields and switches settings sections accessibly", () => {
   expect(document.activeElement).toBe(
     screen.getByRole("tab", { name: "Autosave" }),
   );
-  expect(screen.getByText("500–60000 ms")).toBeTruthy();
+  expect(screen.getByText("500-60000 ms")).toBeTruthy();
   expect(
     screen.getByText(
       "With autosave off, changes stay in memory until you save manually (Ctrl+S).",

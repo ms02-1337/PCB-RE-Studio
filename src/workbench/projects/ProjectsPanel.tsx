@@ -66,6 +66,25 @@ export function ProjectsPanel(props: {
     (sum, asset) => sum + asset.size, 0,
   );
 
+  const visualPcbs = () => store.doc()?.visualEditor?.pcbs ?? [];
+  const visualImagesCount = () =>
+    visualPcbs().reduce((sum, pcb) => sum + (pcb.images?.length ?? 0), 0);
+  const visualTracesCount = () =>
+    visualPcbs().reduce((sum, pcb) => sum + (pcb.traces?.length ?? 0), 0);
+  const visualViasCount = () =>
+    visualPcbs().reduce((sum, pcb) => sum + (pcb.vias?.length ?? 0), 0);
+  const visualZonesCount = () =>
+    visualPcbs().reduce((sum, pcb) => sum + (pcb.zones?.length ?? 0), 0);
+  const visualNetsCount = () =>
+    visualPcbs().reduce((sum, pcb) => sum + (pcb.nets?.length ?? 0), 0);
+
+  const componentsCount = () => store.doc()?.components.length ?? 0;
+  const verifiedCount = () =>
+    store.doc()?.components.filter((c) => c.status === "verified").length ?? 0;
+  const typesCount = () => store.doc()?.types.length ?? 0;
+  const layersCount = () => store.doc()?.boards.length ?? 0;
+  const assetsCount = () => Object.keys(store.doc()?.assets ?? {}).length;
+
   const actionButton = (
     label: string,
     run: () => void,
@@ -127,13 +146,40 @@ export function ProjectsPanel(props: {
         }
       >
         <div class="projects-card">
-          <div class="projects-heading"><h1>Project overview</h1><p class="muted">Project details and board documentation at a glance.</p></div>
-          <dl class="project-metrics" aria-label="Project statistics">
-            <div><dt>Layers</dt><dd>{store.doc()?.boards.length ?? 0}</dd></div>
-            <div><dt>Components</dt><dd>{store.doc()?.components.length ?? 0}</dd></div>
-            <div><dt>Assets</dt><dd>{Object.keys(store.doc()?.assets ?? {}).length}</dd></div>
-            <div><dt>Asset storage</dt><dd>{formatSize(assetBytes())}</dd></div>
-          </dl>
+          <div class="projects-heading">
+            <h1>Project overview</h1>
+            <p class="muted">
+              Project details and board documentation at a glance.
+            </p>
+          </div>
+          <div class="projects-stats" aria-label="Project statistics">
+            <div class="projects-stats-group">
+              <h2 class="projects-stats-heading">Board mapping</h2>
+              <dl class="project-metrics">
+                <div><dt>Layers</dt><dd>{layersCount()}</dd></div>
+                <div><dt>Components</dt><dd>{componentsCount()}</dd></div>
+                <div><dt>Verified</dt><dd>{verifiedCount()}</dd></div>
+                <div><dt>Component types</dt><dd>{typesCount()}</dd></div>
+              </dl>
+            </div>
+            <div class="projects-stats-group">
+              <h2 class="projects-stats-heading">Visual editor</h2>
+              <dl class="project-metrics">
+                <div><dt>Photographs</dt><dd>{visualImagesCount()}</dd></div>
+                <div><dt>Traces</dt><dd>{visualTracesCount()}</dd></div>
+                <div><dt>Vias</dt><dd>{visualViasCount()}</dd></div>
+                <div><dt>Zones</dt><dd>{visualZonesCount()}</dd></div>
+                <div><dt>Nets</dt><dd>{visualNetsCount()}</dd></div>
+              </dl>
+            </div>
+            <div class="projects-stats-group">
+              <h2 class="projects-stats-heading">Storage & Assets</h2>
+              <dl class="project-metrics">
+                <div><dt>Assets</dt><dd>{assetsCount()}</dd></div>
+                <div><dt>Asset storage</dt><dd>{formatSize(assetBytes())}</dd></div>
+              </dl>
+            </div>
+          </div>
           <label>
             <span>Project name</span>
             <input
@@ -162,8 +208,8 @@ export function ProjectsPanel(props: {
             />
           </label>
           <div class="projects-meta">
-            <p>Created {formatDateTime(store.doc()?.createdAt) || "—"}</p>
-            <p>Updated {formatDateTime(store.doc()?.updatedAt) || "—"}</p>
+            <p>Created {formatDateTime(store.doc()?.createdAt) || "-"}</p>
+            <p>Updated {formatDateTime(store.doc()?.updatedAt) || "-"}</p>
             <p class="projects-path" title={store.projectPath() ?? undefined}>
               {store.projectPath()}
             </p>

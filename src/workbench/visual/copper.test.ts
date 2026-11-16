@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  openTraceEnds,
   layerResizePlan,
   connected,
   inside,
@@ -123,4 +124,34 @@ describe("copper geometry", () => {
     expect(p.traces[0].netId).toBe(b.id);
     expect(p.zones[0].netId).toBe(b.id);
   });
+});
+
+it("marks open ends of segmented traces and clears a physically reconnected end", () => {
+  const pcb = newVisualPcb();
+  const layer = pcb.layers[0];
+  pcb.traces = [{id:"a",layerId:layer,width:2,points:[{x:0,y:0},{x:10,y:0},{x:10,y:10}]}];
+  expect(openTraceEnds(pcb)).toHaveLength(2);
+  pcb.vias = [via("v",10,10)];
+  expect(openTraceEnds(pcb).map(e=>e.point)).toEqual([{x:0,y:0}]);
+  pcb.vias[0].x = 100;
+  expect(openTraceEnds(pcb)).toHaveLength(2);
+  pcb.traces.push({id:"b",layerId:pcb.layers[1],width:2,points:[{x:0,y:0},{x:-10,y:0}]});
+  expect(openTraceEnds(pcb).filter(e=>e.traceId==="a")).toHaveLength(2);
+  pcb.traces[1].layerId = layer;
+  expect(openTraceEnds(pcb).filter(e=>e.traceId==="a")).toHaveLength(1);
+});
+
+it("shows a loose endpoint after a component pad moves away and clears it on reconnection", () => {
+  const pcb = newVisualPcb();
+  const layerId = pcb.layers[0];
+  pcb.pxPerMm = 1;
+  pcb.components = [{id:"c",reference:"J1",value:"",partName:"",x:0,y:0,rotation:0,scale:1,layerId,
+    terminals:[{number:"1"}],definition:{id:"d",name:"Connector",partName:"",value:"",referencePrefix:"J",pinMap:{"1":"1"},
+      footprint:{id:"f",name:"Pad",source:"",raw:"",diagnostics:[],graphics:[],pads:[{number:"1",x:0,y:0,width:4,height:4,shape:"rect",rotation:0,plated:false,layers:["F.Cu"]}]}}}];
+  pcb.traces = [{id:"trace",layerId,width:1,points:[{x:0,y:0},{x:10,y:0},{x:10,y:20}]}];
+  expect(openTraceEnds(pcb).map(e=>e.point)).toEqual([{x:10,y:20}]);
+  pcb.components[0].x = 20;
+  expect(openTraceEnds(pcb)).toHaveLength(2);
+  pcb.components[0].x = 0;
+  expect(openTraceEnds(pcb)).toHaveLength(1);
 });

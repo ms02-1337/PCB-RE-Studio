@@ -31,7 +31,7 @@ function graphics(g: KGraphic): string {
   if (g.kind === "arc" && p.length >= 3)
     return `(arc (start ${n(p[0].x)} ${n(p[0].y)}) (mid ${n(p[1].x)} ${n(p[1].y)}) (end ${n(p[2].x)} ${n(p[2].y)}) ${stroke} ${fill})`;
   if (g.kind === "text")
-    return `(text ${q(g.text ?? "")} (at ${n(p[0].x)} ${n(p[0].y)} 0) ${effects()})`;
+    return `(text ${q(g.text ?? "")} (at ${n(p[0].x)} ${n(p[0].y)} ${n(g.rotation ?? 0)}) (effects (font (size ${n(g.fontSize?.width ?? 1.27)} ${n(g.fontSize?.height ?? 1.27)}))))`;
   return `(${g.kind === "bezier" ? "bezier" : "polyline"} (pts ${p.map((p) => `(xy ${n(p.x)} ${n(p.y)})`).join(" ")}) ${stroke} ${fill})`;
 }
 function exportedPins(c: ElectricalComponent, unit: number, bodyStyle = 1) {
@@ -52,11 +52,14 @@ function exportedPins(c: ElectricalComponent, unit: number, bodyStyle = 1) {
         (u.bodyStyle === 0 || u.bodyStyle === bodyStyle),
     )
     .flatMap((u) => u.pins)
-    .flatMap((pin) =>
-      Object.entries(c.definition.pinMap)
+    .flatMap((pin) => {
+      const mapped = Object.entries(c.definition.pinMap)
         .filter(([, num]) => num === pin.number)
-        .map(([number]) => ({ ...pin, number })),
-    );
+        .map(([number]) => ({ ...pin, number }));
+      return mapped.length
+        ? mapped
+        : [{ ...pin, number: `UNMAPPED_SYMBOL_${pin.number}` }];
+    });
   if (unit === 1)
     for (const t of c.terminals)
       if (!c.definition.pinMap[t.number])
@@ -138,14 +141,53 @@ export function buildSchematicFiles(
   pcb: VisualPcb,
 ): { name: string; text: string }[] {
   const components = pcb.components ?? [],
-    doc = pcb.schematic ?? { units: [], wires: [], labels: [] },
+    doc = structuredClone(
+      pcb.schematic ?? { units: [], wires: [], labels: [] },
+    ),
     root = stableUuid(`${pcb.id}/sheet`),
     warnings: string[] = [];
   const refs = new Set<string>();
   for (const c of components) {
+    const required = [
+      ...new Set(
+        c.definition.symbol?.units
+          .filter((u) => u.unit > 0 && u.bodyStyle <= 1)
+          .map((u) => u.unit) ?? [1],
+      ),
+    ];
+    for (const unit of required.length ? required : [1])
+      if (!doc.units.some((u) => u.componentId === c.id && u.unit === unit)) {
+        const i = doc.units.length;
+        doc.units.push({
+          id: `${c.id}/unit/${unit}`,
+          componentId: c.id,
+          unit,
+          x: 25 + (i % 5) * 40,
+          y: 25 + Math.floor(i / 5) * 45,
+          rotation: 0,
+        });
+      }
+  }
+  for (const c of components) {
     if (!c.reference.trim() || refs.has(c.reference))
       throw new Error(`Duplicate or empty reference: ${c.reference}`);
     refs.add(c.reference);
+    if (c.definition.symbol) {
+      const exposed = doc.units
+        .filter((u) => u.componentId === c.id)
+        .flatMap((u) => exportedPins(c, u.unit, u.bodyStyle ?? 1));
+      if (
+        c.terminals.some(
+          (t) => !exposed.some((pin) => pin.number === t.number),
+        ) ||
+        Object.keys(c.definition.pinMap).some(
+          (number) => !c.terminals.some((t) => t.number === number),
+        )
+      )
+        throw new Error(
+          `${c.reference}: pin mapping refers to a missing pad or symbol pin.`,
+        );
+    }
     if (
       c.definition.footprint.diagnostics.length ||
       c.definition.symbol?.diagnostics.length
@@ -158,6 +200,16 @@ export function buildSchematicFiles(
     if (!c.definition.symbol)
       warnings.push(
         `${c.reference}: exported generic symbol; identify the component later.`,
+      );
+    if (
+      c.definition.symbol?.units.some((u) =>
+        u.pins.some(
+          (pin) => !Object.values(c.definition.pinMap).includes(pin.number),
+        ),
+      )
+    )
+      warnings.push(
+        `${c.reference}: unmapped symbol pins are preserved as unconnected UNMAPPED_SYMBOL terminals.`,
       );
     for (const t of c.terminals)
       if (!t.nc && !t.netId)
@@ -194,8 +246,63 @@ export function buildSchematicFiles(
       b = w.end && pinPoint(w.end);
     if (a) points[0] = a;
     if (b) points[points.length - 1] = b;
-    return { ...w, points };
+    const routed = points.flatMap((p, i) =>
+      !i
+        ? [p]
+        : points[i - 1].x === p.x || points[i - 1].y === p.y
+          ? [p]
+          : [{ x: p.x, y: points[i - 1].y }, p],
+    );
+    return { ...w, points: routed };
   });
+  const displayedLabels = doc.labels.map((l) => ({
+    ...l,
+    ...(l.anchor ? pinPoint(l.anchor) : undefined),
+  }));
+  const terminalPoints = doc.units.flatMap((u) => {
+    const c = components.find((c) => c.id === u.componentId);
+    return c
+      ? exportedPins(c, u.unit, u.bodyStyle ?? 1).map((pin) => ({
+          point: point(u, pin),
+          identity: `${c.id}/${pin.number}`,
+          terminal: c.terminals.find((t) => t.number === pin.number),
+        }))
+      : [];
+  });
+  for (let i = 0; i < displayedLabels.length; i++) {
+    const label = displayedLabels[i];
+    if (
+      displayedLabels
+        .slice(i + 1)
+        .some(
+          (other) =>
+            other.netId !== label.netId && distance(label, other) < 1e-6,
+        ) ||
+      terminalPoints.some(
+        (pin) =>
+          distance(label, pin.point) < 1e-6 &&
+          (pin.terminal?.netId !== label.netId || pin.terminal?.nc),
+      )
+    )
+      throw new Error(
+        "Schematic labels conflict with overlapping terminal or label assignments.",
+      );
+  }
+  for (let i = 0; i < terminalPoints.length; i++)
+    for (const other of terminalPoints.slice(i + 1)) {
+      const a = terminalPoints[i];
+      if (
+        a.identity !== other.identity &&
+        distance(a.point, other.point) < 1e-6 &&
+        (!a.terminal?.netId ||
+          a.terminal.netId !== other.terminal?.netId ||
+          a.terminal.nc ||
+          other.terminal?.nc)
+      )
+        throw new Error(
+          "Overlapping schematic pins would introduce an implicit connection. Move them apart or explicitly assign their nets.",
+        );
+    }
   const onWire = (p: Point, w: (typeof displayedWires)[number]) =>
     w.points
       .slice(1)
@@ -229,7 +336,7 @@ export function buildSchematicFiles(
           if (t?.netId) ids.add(t.netId);
         }
     }
-    for (const l of doc.labels)
+    for (const l of displayedLabels)
       if (group.some((w) => onWire(l, w))) ids.add(l.netId);
     if (ids.size > 1)
       throw new Error(
@@ -241,7 +348,7 @@ export function buildSchematicFiles(
     if (!c) throw new Error("Schematic references a missing component.");
     const id = stableUuid(`${pcb.id}/${u.id}`),
       footprint = `PCBRE:C_${c.id.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-    return `(symbol (lib_id ${q(names.get(c.id)!)}) (at ${n(u.x)} ${n(u.y)} ${n((360 - u.rotation) % 360)}) (unit ${u.unit})${u.flip ? " (mirror y)" : ""} (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid ${id})
+    return `(symbol (lib_id ${q(names.get(c.id)!)}) (at ${n(u.x)} ${n(u.y)} ${n(u.flip ? u.rotation : (360 - u.rotation) % 360)}) (unit ${u.unit})${u.flip ? " (mirror y)" : ""} (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid ${id})
       (property "Reference" ${q(c.reference)} (at ${n(u.x)} ${n(u.y - 12)} 0) ${effects()})
       (property "Value" ${q(c.value || c.partName || "~")} (at ${n(u.x)} ${n(u.y - 9)} 0) ${effects()})
       (property "Footprint" ${q(footprint)} (at ${n(u.x)} ${n(u.y)} 0) ${effects(1.27, true)})
@@ -253,7 +360,7 @@ export function buildSchematicFiles(
         .join("\n")}
       (instances (project "pcb-re-studio" (path ${q(`/${root}`)} (reference ${q(c.reference)}) (unit ${u.unit})))))`;
   });
-  const wires = doc.wires.flatMap((w) => {
+  const wires = displayedWires.flatMap((w) => {
     const points = w.points.map((p) => ({ ...p })),
       a = w.start && pinPoint(w.start),
       b = w.end && pinPoint(w.end);
@@ -297,7 +404,7 @@ export function buildSchematicFiles(
       }
     }
   }
-  for (const l of doc.labels) {
+  for (const l of displayedLabels) {
     const net = pcb.nets?.find((n) => n.id === l.netId);
     if (net)
       labels.push(
@@ -305,11 +412,11 @@ export function buildSchematicFiles(
       );
   }
   const junctions = new Map<string, Point>();
-  for (const w of doc.wires)
+  for (const w of displayedWires)
     for (const p of [w.points[0], w.points.at(-1)!])
       if (
         p &&
-        doc.wires.filter((other) =>
+        displayedWires.filter((other) =>
           other.points.slice(1).some((b, i) => {
             const a = other.points[i],
               cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
@@ -342,7 +449,7 @@ export function buildSchematicFiles(
     },
     {
       name: "unfinished-work.txt",
-      text: `${project.name} — ${pcb.name}\n\n${warnings.length ? warnings.join("\n") : "No unresolved electrical items detected."}\n\nPower connectivity is explicit. Hidden symbol pins are materialized; no symbol-name-based implicit power joins were generated.\n`,
+      text: `${project.name} - ${pcb.name}\n\n${warnings.length ? warnings.join("\n") : "No unresolved electrical items detected."}\n\nPower connectivity is explicit. Hidden symbol pins are materialized; no symbol-name-based implicit power joins were generated.\n`,
     },
   ];
   for (const c of components) {
@@ -353,7 +460,7 @@ export function buildSchematicFiles(
       const pads = footprint.pads
         .map(
           (p) =>
-            `(pad ${q(p.number)} ${p.drill ? (p.plated ? "thru_hole" : "np_thru_hole") : "smd"} ${p.shape === "custom" ? "custom" : p.shape} (at ${n(p.x * s)} ${n(p.y * s)} ${n(p.rotation)}) (size ${n(p.width * s)} ${n(p.height * s)}) ${p.drill ? `(drill ${p.drill.width !== p.drill.height ? "oval " : ""}${n(p.drill.width * s)}${p.drill.width !== p.drill.height ? ` ${n(p.drill.height * s)}` : ""} (offset ${n(p.drill.x * s)} ${n(p.drill.y * s)}))` : ""} (layers ${p.layers.map(q).join(" ")})${p.shape === "roundrect" ? ` (roundrect_rratio ${p.roundrectRatio ?? 0.25})` : ""}${p.shape === "custom" ? ` (options (clearance outline) (anchor rect)) (primitives ${(p.primitives ?? []).map((g) => footprintGraphic(g, s, true)).join(" ")})` : ""})`,
+            `(pad ${q(p.number)} ${p.type ?? (p.drill ? (p.plated ? "thru_hole" : "np_thru_hole") : "smd")} ${p.shape === "custom" ? "custom" : p.shape} (at ${n(p.x * s)} ${n(p.y * s)} ${n(p.rotation)}) (size ${n(p.width * s)} ${n(p.height * s)}) ${p.drill ? `(drill ${p.drill.width !== p.drill.height ? "oval " : ""}${n(p.drill.width * s)}${p.drill.width !== p.drill.height ? ` ${n(p.drill.height * s)}` : ""} (offset ${n(p.drill.x * s)} ${n(p.drill.y * s)}))` : ""} (layers ${p.layers.map(q).join(" ")})${p.shape === "roundrect" ? ` (roundrect_rratio ${p.roundrectRatio ?? 0.25})` : ""}${p.shape === "custom" ? ` (options (clearance outline) (anchor ${p.anchor ?? "rect"})) (primitives ${(p.primitives ?? []).map((g) => footprintGraphic(g, s, true)).join(" ")})` : ""})`,
         )
         .join("\n");
       files.push({
@@ -383,7 +490,7 @@ function footprintGraphic(
   if (g.kind === "text")
     return primitive
       ? ""
-      : `(fp_text user ${q(g.text ?? "")} (at ${p[0]?.x ?? 0} ${p[0]?.y ?? 0}) ${layer} ${effects()})`;
+      : `(fp_text user ${q(g.text ?? "")} (at ${p[0]?.x ?? 0} ${p[0]?.y ?? 0} ${n(g.rotation ?? 0)}) ${layer} (effects (font (size ${n((g.fontSize?.width ?? 1.27) * scale)} ${n((g.fontSize?.height ?? 1.27) * scale)}))))`;
   if (!p.length) return "";
   if (g.kind === "circle" && p.length > 1)
     return `(${type}_circle (center ${p[0].x} ${p[0].y}) (end ${p[1].x} ${p[1].y}) ${stroke} (fill ${g.fill ? "solid" : "none"}) ${layer})`;

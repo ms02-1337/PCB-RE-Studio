@@ -4,6 +4,7 @@ import { For, Show, createSignal } from "solid-js";
 import type { PlacementStore } from "./store";
 import { ActionIcon } from "../ActionIcon";
 import { ContextMenu } from "./ContextMenu";
+import { TabScroller } from "../TabScroller";
 
 export function BoardBar(props: { store: PlacementStore; onAddBoard: () => void }) {
   const store = props.store;
@@ -28,7 +29,7 @@ export function BoardBar(props: { store: PlacementStore; onAddBoard: () => void 
   };
 
   return (
-    <div class="pl-boardbar" role="toolbar" aria-label="Boards">
+    <TabScroller class="pl-boardbar" label="Boards">
       <For each={store.mappingTabs()}>
         {(board) => (
           <Show
@@ -52,7 +53,7 @@ export function BoardBar(props: { store: PlacementStore; onAddBoard: () => void 
               <button
                 class="pl-board-tab"
                 aria-current={store.activeMappingTab()?.id === board.id ? "true" : undefined}
-                title={`${board.name} — double-click or F2 to rename`}
+                title={`${board.name} - double-click or F2 to rename`}
                 onClick={() => store.activateMappingTab(board.id)}
                 onDblClick={() => startRename(board.id, board.name)}
                 onContextMenu={(event) => { event.preventDefault(); setMenu({ id: board.id, name: board.name, x: event.clientX, y: event.clientY, target: event.currentTarget }); }}
@@ -74,6 +75,6 @@ export function BoardBar(props: { store: PlacementStore; onAddBoard: () => void 
         +
       </button>
       <Show when={menu()} keyed>{(current) => <ContextMenu x={current.x} y={current.y} restoreFocus={current.target} onClose={() => setMenu(null)} items={[{ label: "Delete tab", run: () => removeBoard(current.id, current.name) }]} />}</Show>
-    </div>
+    </TabScroller>
   );
 }

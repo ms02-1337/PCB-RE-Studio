@@ -197,13 +197,46 @@ export function insertPolygonVertex(points: Point[], edgeIndex: number): Point[]
   return [...points.slice(0, edgeIndex + 1), midpoint, ...points.slice(edgeIndex + 1)];
 }
 
-/** Rect resize with the opposite side/corner anchored; may invert through
- * zero, so the result is normalized. */
+/** True for the four bbox-corner handles (nw/ne/se/sw, two letters). Edge
+ * midpoints (n/e/s/w, one letter) are single-axis handles. */
+export function isCornerHandle(handle: RectHandle | EllipseHandle): boolean {
+  return handle.length === 2;
+}
+
+/** Corner resize that keeps the original w:h ratio. The opposite corner stays
+ * anchored; the dominant relative delta (|dx|/baseW vs |dy|/baseH) picks the
+ * scale and the other axis follows it. Like free resize the drag may invert
+ * through zero, so the result is normalized. */
+function proportionalResize(
+  opposite: Point,
+  point: Point,
+  baseW: number,
+  baseH: number,
+): { x: number; y: number; w: number; h: number } {
+  const dx = point.x - opposite.x;
+  const dy = point.y - opposite.y;
+  const scale = Math.max(Math.abs(dx) / baseW, Math.abs(dy) / baseH);
+  return normalizeRect(opposite, {
+    x: opposite.x + Math.sign(dx || 1) * scale * baseW,
+    y: opposite.y + Math.sign(dy || 1) * scale * baseH,
+  });
+}
+
+/** Rect resize with the opposite side/corner anchored: edge handles move one
+ * axis, corner handles keep the w:h ratio. Either way the drag may invert
+ * through zero, so the result is normalized. */
 export function resizeRect(
   rect: { x: number; y: number; w: number; h: number },
   handle: RectHandle,
   point: Point,
 ): { x: number; y: number; w: number; h: number } {
+  if (isCornerHandle(handle)) {
+    const opposite = {
+      x: handle.includes("e") ? rect.x : rect.x + rect.w,
+      y: handle.includes("s") ? rect.y : rect.y + rect.h,
+    };
+    return proportionalResize(opposite, point, rect.w, rect.h);
+  }
   let left = rect.x;
   let top = rect.y;
   let right = rect.x + rect.w;
@@ -215,13 +248,27 @@ export function resizeRect(
   return normalizeRect({ x: left, y: top }, { x: right, y: bottom });
 }
 
-/** Ellipse extent resize; corner handles move both axes. Like resizeRect the
- * drag may invert through zero, so the bbox is normalized. */
+/** Ellipse extent resize: edge handles move one axis, corner handles keep the
+ * rx:ry ratio (a circle stays a circle). Like resizeRect the drag may invert
+ * through zero, so the bbox is normalized. */
 export function resizeEllipse(
   ellipse: { cx: number; cy: number; rx: number; ry: number },
   handle: EllipseHandle,
   point: Point,
 ): { cx: number; cy: number; rx: number; ry: number } {
+  if (isCornerHandle(handle)) {
+    const opposite = {
+      x: handle.includes("e") ? ellipse.cx - ellipse.rx : ellipse.cx + ellipse.rx,
+      y: handle.includes("s") ? ellipse.cy - ellipse.ry : ellipse.cy + ellipse.ry,
+    };
+    const box = proportionalResize(opposite, point, ellipse.rx * 2, ellipse.ry * 2);
+    return {
+      cx: box.x + box.w / 2,
+      cy: box.y + box.h / 2,
+      rx: box.w / 2,
+      ry: box.h / 2,
+    };
+  }
   let top = ellipse.cy - ellipse.ry;
   let bottom = ellipse.cy + ellipse.ry;
   let left = ellipse.cx - ellipse.rx;

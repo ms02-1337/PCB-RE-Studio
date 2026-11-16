@@ -127,8 +127,7 @@
   padding: 4px 8px;
   background: var(--surface);
   border-top: 1px solid var(--border);
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: hidden;
 }
 .pl-board-chip {
   display: inline-flex;
@@ -364,10 +363,17 @@
 .type-manager select {
   font: inherit;
   color: var(--text);
-  background: var(--bg);
+  /* background-color (not the shorthand) so the global select chevron
+     image survives this override. */
+  background-color: var(--bg);
   border: 1px solid var(--border);
   padding: 4px 6px;
   min-width: 0;
+}
+/* The compact 6px padding would run text under the global chevron. */
+.pl-properties select,
+.type-manager select {
+  padding-right: 24px;
 }
 .pl-properties textarea {
   resize: vertical;
@@ -770,8 +776,8 @@ button.pl-combobox-add:hover:not(:disabled) {
 }
 
 .type-manager {
-  width: min(680px, 94vw);
-  max-height: min(620px, calc(100dvh - 48px));
+  width: min(920px, 94vw);
+  height: min(760px, calc(100dvh - 48px));
 }
 /* The table area scrolls while the header and footer stay fixed. */
 .type-manager .type-dialog-content {
@@ -784,7 +790,7 @@ button.pl-combobox-add:hover:not(:disabled) {
   font-size: 12px;
 }
 .type-table th {
-  text-align: left;
+  text-align: center;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.7px;
@@ -797,6 +803,7 @@ button.pl-combobox-add:hover:not(:disabled) {
   padding: 4px 6px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  text-align: center;
 }
 .type-table td:first-child {
   display: flex;
@@ -805,9 +812,12 @@ button.pl-combobox-add:hover:not(:disabled) {
   gap: 4px;
 }
 /* Compact rows: theme.css's 6px 10px button padding inflates the Name and
-   Delete cells above every other cell. */
+   Delete cells above every other cell. Labels center with the columns
+   (.palette button in theme.css defaults them to left; same specificity,
+   later file wins). */
 .type-table button {
   padding: 4px 6px;
+  text-align: center;
 }
 /* Square native color swatch; the pseudo-element resets are Chromium's
    default inset wrapper/border around the color fill. */
@@ -823,9 +833,6 @@ button.pl-combobox-add:hover:not(:disabled) {
 }
 .type-table .type-color-swatch::-webkit-color-swatch-wrapper {
   padding: 0;
-}
-.type-name {
-  text-align: left;
 }
 .type-rename {
   width: 120px;
@@ -853,12 +860,25 @@ button.pl-combobox-add:hover:not(:disabled) {
   font-size: 11px;
   color: var(--muted);
 }
-.type-add input[type="text"] {
+/* The Name/Prefix inputs carry no type attribute, so match them by class
+   scope instead of [type="text"]. The margin reset matters: this modal is a
+   .palette, and theme.css gives .palette input an 8px bottom margin - left
+   alone it rides below each input inside its label, so the flex-end row
+   lines the Add-type button up with the label bottoms (8px below the
+   inputs). */
+.type-add input {
   width: 110px;
+  margin-bottom: 0;
 }
 /* Match the Add-type button to the 11px Name/Prefix inputs beside it (the
    inputs inherit font: inherit from their 11px labels; theme.css buttons
-   would otherwise render at 13px with taller padding). */
+   would otherwise render at 13px with taller padding). Equal explicit
+   heights + the row's flex-end alignment put the button exactly on the
+   inputs' line. */
+.type-add input,
+.type-add button {
+  height: 26px;
+}
 .type-add button {
   padding: 4px 6px;
   font-size: 11px;

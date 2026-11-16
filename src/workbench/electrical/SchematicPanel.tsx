@@ -1,9 +1,16 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  For,
+  Show,
+} from "solid-js";
 import type { KGraphic, KPin } from "../../bridge/kicad";
 import type { PlacementStore } from "../placement/store";
 import type { Point } from "../placement/projectDoc";
 import { visualId, type VisualPcb } from "../visual/model";
-import { newNet, project, distance } from "../visual/copper";
+import { newNet, project, distance, ncContacts } from "../visual/copper";
 import type {
   ElectricalComponent,
   SchematicDocument,
@@ -45,11 +52,12 @@ export function symbolPins(
         (u.bodyStyle === 0 || u.bodyStyle === bodyStyle),
     )
     .flatMap((u) => u.pins);
-  const result = pins.flatMap((pin) =>
-    Object.entries(c.definition.pinMap)
+  const result = pins.flatMap((pin) => {
+    const mapped = Object.entries(c.definition.pinMap)
       .filter(([, num]) => num === pin.number)
-      .map(([terminal]) => ({ ...pin, terminal })),
-  );
+      .map(([terminal]) => ({ ...pin, terminal }));
+    return mapped.length ? mapped : [{ ...pin, terminal: "" }];
+  });
   if (unit === 1)
     for (const t of c.terminals)
       if (!c.definition.pinMap[t.number])
@@ -108,6 +116,33 @@ export function initialUnits(
 export function orthogonal(a: Point, b: Point): Point[] {
   return a.x === b.x || a.y === b.y ? [a, b] : [a, { x: b.x, y: a.y }, b];
 }
+export function resolveWireGeometry(
+  pcb: VisualPcb,
+  wire: SchematicWire,
+): Point[] {
+  const resolve = (anchor?: WireAnchor): Point | undefined => {
+    if (!anchor) return;
+    const c = pcb.components?.find((c) => c.id === anchor.componentId),
+      u = pcb.schematic?.units.find(
+        (u) =>
+          u.componentId === anchor.componentId &&
+          (!anchor.unit || u.unit === anchor.unit),
+      );
+    if (!c || !u) return;
+    const pin = symbolPins(c, u.unit, u.bodyStyle ?? 1).find(
+      (pin) => pin.terminal === anchor.terminal,
+    );
+    return pin ? schematicPoint(u, pin) : undefined;
+  };
+  const points = wire.points.map((p) => ({ ...p })),
+    a = resolve(wire.start),
+    b = resolve(wire.end);
+  if (a) points[0] = a;
+  if (b) points[points.length - 1] = b;
+  return points.flatMap((p, i) =>
+    i ? orthogonal(points[i - 1], p).slice(1) : [p],
+  );
+}
 export function wiresJoined(a: SchematicWire, b: SchematicWire): boolean {
   const on = (p: Point, wire: SchematicWire) =>
     wire.points
@@ -132,6 +167,18 @@ export function wireGroup(
       if (!found.includes(wire) && wiresJoined(found[i], wire))
         found.push(wire);
   return found;
+}
+export function segmentMidpoints(
+  points: Point[],
+): Array<Point & { seg: number }> {
+  const out: Array<Point & { seg: number }> = [];
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i],
+      b = points[i + 1];
+    if (distance(a, b) > 1e-6)
+      out.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, seg: i });
+  }
+  return out;
 }
 export function Graphic(props: { graphic: KGraphic }) {
   const g = () => props.graphic,
@@ -159,11 +206,12 @@ export function Graphic(props: { graphic: KGraphic }) {
       </Show>
       <Show when={g().kind === "text" && pts().length}>
         <text
-          x={pts()[0].x}
-          y={-pts()[0].y}
+          x={0}
+          y={0}
+          transform={`translate(${pts()[0].x} ${-pts()[0].y}) rotate(${-(g().rotation ?? 0)}) scale(${(g().fontSize?.width ?? 1.5) / (g().fontSize?.height ?? 1.5)} 1)`}
           fill="currentColor"
           stroke="none"
-          font-size="1.5"
+          font-size={String(g().fontSize?.height ?? 1.5)}
         >
           {g().text}
         </text>
@@ -231,9 +279,14 @@ export function SchematicPanel(props: {
   const [draft, setDraft] = createSignal<Point[]>([]),
     [cursor, setCursor] = createSignal<Point | null>(null);
   const [dragOffset, setDragOffset] = createSignal<Point | null>(null);
-  const [wireDraft, setWireDraft] = createSignal<{ id: string; points: Point[] } | null>(null);
-  let wireDrag: { previous: VisualPcb; id: string; index: number } | null = null;
+  const [wireDraft, setWireDraft] = createSignal<{
+    id: string;
+    points: Point[];
+  } | null>(null);
+  let wireDrag: { previous: VisualPcb; id: string; index: number } | null =
+    null;
   let startAnchor: WireAnchor | undefined;
+  let routeOrigin: VisualPcb | undefined;
   let drag: { point: Point; previous: VisualPcb; units: string[] } | null =
     null;
   let pan: { x: number; y: number; view: ReturnType<typeof view> } | null =
@@ -247,6 +300,8 @@ export function SchematicPanel(props: {
     if (!p) return;
     const next = structuredClone(p);
     change(next);
+    for (const w of next.schematic?.wires ?? [])
+      w.points = resolveWireGeometry(next, w);
     props.store.visual.replacePcb(next);
   };
   const cancel = () => {
@@ -256,43 +311,69 @@ export function SchematicPanel(props: {
     pan = null;
     setDragOffset(null);
     startAnchor = undefined;
-    wireDrag = null; setWireDraft(null);
+    routeOrigin = undefined;
+    wireDrag = null;
+    setWireDraft(null);
   };
-  createEffect(() => {
-    const p = pcb();
-    const s = `${props.store.projectSession()}/${p?.id}`;
-    if (scope !== s) {
-      scope = s;
-      cancel();
-      setSelected([]);
-      setSelectedWire("");
-      setPending(null);
-      setNet("");
-    }
-    if (props.active === false) {
-      cancel();
-      setPending(null);
-      return;
-    }
-    if (p && (p.components?.length ?? 0)) {
-      const units = initialUnits(p.components!, [
-        ...(p.schematic?.units ?? []),
-      ]);
-      if (
-        units.length !== (p.schematic?.units.length ?? 0) ||
-        units.some((u, i) => u.id !== p.schematic?.units[i]?.id)
-      )
-        edit((next) => {
-          next.schematic ??= emptySchematic();
-          next.schematic.units = units;
-        });
-    }
-    if (drag && drag.previous !== p) {
-      drag = null;
-      setDragOffset(null);
-    }
-    if (pending() && pending()!.previous !== p) setPending(null);
-  });
+  createEffect(
+    on([pcb, () => props.active, () => props.store.projectSession()], () => {
+      const p = pcb();
+      const s = `${props.store.projectSession()}/${p?.id}`;
+      if (scope !== s) {
+        scope = s;
+        cancel();
+        setSelected([]);
+        setSelectedWire("");
+        setPending(null);
+        setNet("");
+      }
+      if (net() && !p?.nets?.some((n) => n.id === net())) setNet("");
+      if (draft().length && routeOrigin !== p) cancel();
+      if (props.active === false) {
+        cancel();
+        setPending(null);
+        return;
+      }
+      const navigation = sessionStorage.getItem(
+        "electrical-schematic-navigation",
+      );
+      if (navigation) {
+        sessionStorage.removeItem("electrical-schematic-navigation");
+        try {
+          const request = JSON.parse(navigation) as { componentId: string };
+          const requested =
+            p?.schematic?.units.filter(
+              (u) => u.componentId === request.componentId,
+            ) ?? [];
+          if (requested.length) {
+            setSelected(requested.map((u) => u.id));
+            const first = requested[0];
+            setView({ x: first.x - 35, y: first.y - 25, w: 100, h: 70 });
+          }
+        } catch {
+          /* Ignore stale navigation. */
+        }
+      }
+      if (p && (p.components?.length ?? 0)) {
+        const units = initialUnits(p.components!, [
+          ...(p.schematic?.units ?? []),
+        ]);
+        if (
+          units.length !== (p.schematic?.units.length ?? 0) ||
+          units.some((u, i) => u.id !== p.schematic?.units[i]?.id)
+        )
+          edit((next) => {
+            next.schematic ??= emptySchematic();
+            next.schematic.units = units;
+          });
+      }
+      if (drag && drag.previous !== p) {
+        drag = null;
+        setDragOffset(null);
+      }
+      if (pending() && pending()!.previous !== p) setPending(null);
+    }),
+  );
   const units = createMemo(() =>
     doc().units.map((u) => {
       const offset = dragOffset();
@@ -305,12 +386,18 @@ export function SchematicPanel(props: {
     units().flatMap((u) => {
       const c = components().find((c) => c.id === u.componentId);
       return c
-        ? symbolPins(c, u.unit, u.bodyStyle ?? 1).map((pin) => ({
-            ...schematicPoint(u, pin),
-            anchor: { componentId: c.id, terminal: pin.terminal, unit: u.unit },
-            pin,
-            component: c,
-          }))
+        ? symbolPins(c, u.unit, u.bodyStyle ?? 1)
+            .filter((pin) => !!pin.terminal)
+            .map((pin) => ({
+              ...schematicPoint(u, pin),
+              anchor: {
+                componentId: c.id,
+                terminal: pin.terminal,
+                unit: u.unit,
+              },
+              pin,
+              component: c,
+            }))
         : [];
     }),
   );
@@ -323,7 +410,9 @@ export function SchematicPanel(props: {
         )
       : undefined;
   const wirePoints = (w: SchematicWire) => {
-    const result = (wireDraft()?.id === w.id ? wireDraft()!.points : w.points).map((p) => ({ ...p }));
+    const result = (
+      wireDraft()?.id === w.id ? wireDraft()!.points : w.points
+    ).map((p) => ({ ...p }));
     const a = anchorPoint(w.start),
       b = anchorPoint(w.end);
     if (a && result.length) result[0] = { x: a.x, y: a.y };
@@ -332,7 +421,21 @@ export function SchematicPanel(props: {
       i ? orthogonal(result[i - 1], p).slice(1) : [p],
     );
   };
+  const selectedWirePoints = () =>
+    wirePoints(
+      doc().wires.find((w) => w.id === selectedWire()) ?? {
+        id: "",
+        points: [],
+      },
+    );
   const coordinates = (event: PointerEvent | MouseEvent) => {
+    if (svg.createSVGPoint && svg.getScreenCTM?.()) {
+      const p = svg.createSVGPoint();
+      p.x = event.clientX;
+      p.y = event.clientY;
+      const mapped = p.matrixTransform(svg.getScreenCTM()!.inverse());
+      return { x: mapped.x, y: mapped.y };
+    }
     const r = svg.getBoundingClientRect(),
       v = view();
     return {
@@ -383,9 +486,19 @@ export function SchematicPanel(props: {
     next: VisualPcb,
     group: SchematicWire[],
   ) => {
+    for (const wire of group)
+      wire.connections = pins()
+        .filter((pin) =>
+          wire.points
+            .slice(1)
+            .some(
+              (p, i) => distance(pin, project(pin, wire.points[i], p)) < 1e-6,
+            ),
+        )
+        .map((pin) => pin.anchor);
     const anchors = [
       ...group
-        .flatMap((w) => [w.start, w.end])
+        .flatMap((w) => [w.start, w.end, ...(w.connections ?? [])])
         .filter((a): a is WireAnchor => !!a),
       ...pins()
         .filter((pin) =>
@@ -413,6 +526,14 @@ export function SchematicPanel(props: {
     )
       return;
     const assignment = assignTerminalNet(next, anchors, net());
+    if (
+      assignment.hasNc &&
+      !terminals.some((t) => t.nc) &&
+      !window.confirm(
+        "This connection reaches NC copper. Clear the NC marks and connect?",
+      )
+    )
+      return;
     const ids = [
       ...new Set(
         [...assignment.conflicts, ...group.map((w) => w.netId)].filter(
@@ -493,6 +614,14 @@ export function SchematicPanel(props: {
         if (terminal?.nc && !window.confirm("Clear NC and connect this label?"))
           return;
         const assignment = assignTerminalNet(next, [hit.anchor], net());
+        if (
+          assignment.hasNc &&
+          !terminal?.nc &&
+          !window.confirm(
+            "This label reaches NC copper. Clear the NC marks and connect?",
+          )
+        )
+          return;
         const apply = (target: string) => {
           if (pcb() !== previous) return;
           assignment.apply(target);
@@ -547,6 +676,7 @@ export function SchematicPanel(props: {
     }
     if (tool() === "wire") {
       if (!draft().length) {
+        routeOrigin = pcb();
         setDraft([hit.point]);
         startAnchor = hit.anchor;
       } else if (
@@ -588,7 +718,20 @@ export function SchematicPanel(props: {
     svg.setPointerCapture?.(e.pointerId);
   };
   const move = (e: PointerEvent) => {
-    if (wireDrag) { const w = doc().wires.find(w => w.id === wireDrag?.id); if (!w || pcb() !== wireDrag.previous) { wireDrag = null; setWireDraft(null); return; } const points = (wireDraft()?.points ?? wirePoints(w)).map(p => ({ ...p })); points[wireDrag.index] = grid(coordinates(e)); setWireDraft({ id: w.id, points }); return; }
+    if (wireDrag) {
+      const w = doc().wires.find((w) => w.id === wireDrag?.id);
+      if (!w || pcb() !== wireDrag.previous) {
+        wireDrag = null;
+        setWireDraft(null);
+        return;
+      }
+      const points = (wireDraft()?.points ?? wirePoints(w)).map((p) => ({
+        ...p,
+      }));
+      points[wireDrag.index] = grid(coordinates(e));
+      setWireDraft({ id: w.id, points });
+      return;
+    }
     if (pan) {
       const r = svg.getBoundingClientRect();
       setView({
@@ -604,7 +747,23 @@ export function SchematicPanel(props: {
     else if (draft().length) setCursor(snap(p).point);
   };
   const up = () => {
-    if (wireDrag) { const d = wireDrag, draft = wireDraft(); wireDrag = null; if (pcb() === d.previous && draft) { const next = structuredClone(d.previous), w = next.schematic?.wires.find(w => w.id === d.id); if (w) { w.points = draft.points.flatMap((p, i) => i ? orthogonal(draft.points[i - 1], p).slice(1) : [p]); commitWires(d.previous, next, wireGroup(next.schematic!.wires, w.id)); } } setWireDraft(null); return; }
+    if (wireDrag) {
+      const d = wireDrag,
+        draft = wireDraft();
+      wireDrag = null;
+      if (pcb() === d.previous && draft) {
+        const next = structuredClone(d.previous),
+          w = next.schematic?.wires.find((w) => w.id === d.id);
+        if (w) {
+          w.points = draft.points.flatMap((p, i) =>
+            i ? orthogonal(draft.points[i - 1], p).slice(1) : [p],
+          );
+          commitWires(d.previous, next, wireGroup(next.schematic!.wires, w.id));
+        }
+      }
+      setWireDraft(null);
+      return;
+    }
     const d = drag,
       offset = dragOffset();
     drag = null;
@@ -642,6 +801,41 @@ export function SchematicPanel(props: {
         "Components remain shared with the PCB. Delete them in the Visual editor; move their units here.",
       );
   };
+  const addJoint = (seg: number) => {
+    const previous = pcb(),
+      w = doc().wires.find((x) => x.id === selectedWire());
+    if (!previous || !w) return;
+    const resolved = resolveWireGeometry(previous, w);
+    if (seg < 0 || seg + 2 > resolved.length) return;
+    const a = resolved[seg],
+      b = resolved[seg + 1];
+    if (distance(a, b) < 1e-6) return;
+    const next = structuredClone(previous);
+    next.schematic ??= emptySchematic();
+    const target = next.schematic.wires.find((x) => x.id === w.id);
+    if (!target) return;
+    resolved.splice(seg + 1, 0, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    target.points = resolved.flatMap((p, i) =>
+      i ? orthogonal(resolved[i - 1], p).slice(1) : [p],
+    );
+    commitWires(previous, next, wireGroup(next.schematic.wires, target.id));
+  };
+  const removeJoint = (index: number) => {
+    const previous = pcb(),
+      w = doc().wires.find((x) => x.id === selectedWire());
+    if (!previous || !w) return;
+    const resolved = resolveWireGeometry(previous, w);
+    if (index < 0 || index + 3 > resolved.length) return;
+    const next = structuredClone(previous);
+    next.schematic ??= emptySchematic();
+    const target = next.schematic.wires.find((x) => x.id === w.id);
+    if (!target) return;
+    resolved.splice(index + 1, 1);
+    target.points = resolved.flatMap((p, i) =>
+      i ? orthogonal(resolved[i - 1], p).slice(1) : [p],
+    );
+    commitWires(previous, next, wireGroup(next.schematic.wires, target.id));
+  };
   const fit = () => {
     const points = [
       ...units().map((u) => ({ x: u.x, y: u.y })),
@@ -666,23 +860,93 @@ export function SchematicPanel(props: {
       const id = p.component.terminals.find(
         (t) => t.number === p.anchor.terminal,
       )?.netId;
-      if (id && !byNet.get(id)?.some(v => key(v.anchor) === key(p.anchor))) byNet.set(id, [...(byNet.get(id) ?? []), p]);
+      if (id && !byNet.get(id)?.some((v) => key(v.anchor) === key(p.anchor)))
+        byNet.set(id, [...(byNet.get(id) ?? []), p]);
     }
     return [...byNet].flatMap(([netId, list]) => {
-      const parent = list.map((_, i) => i), find = (i: number): number => parent[i] === i ? i : parent[i] = find(parent[i]);
-      const union = (ids: number[]) => { for (const i of ids.slice(1)) parent[find(i)] = find(ids[0]); };
+      const parent = list.map((_, i) => i),
+        find = (i: number): number =>
+          parent[i] === i ? i : (parent[i] = find(parent[i]));
+      const union = (ids: number[]) => {
+        for (const i of ids.slice(1)) parent[find(i)] = find(ids[0]);
+      };
       const visited = new Set<string>();
-      for (const wire of doc().wires) { if (visited.has(wire.id)) continue; const group = wireGroup(doc().wires, wire.id); for (const w of group) visited.add(w.id); const reached = list.flatMap((pin, i) => group.some(w => wirePoints(w).slice(1).some((p, j) => distance(pin, project(pin, wirePoints(w)[j], p)) < 1e-6)) ? [i] : []); union(reached); }
-      const labelled = list.flatMap((pin, i) => doc().labels.some(label => label.netId === netId && (label.anchor ? key(label.anchor) === key(pin.anchor) : distance(pin, label) < 1e-6)) ? [i] : []); union(labelled);
-      const representatives = [...new Set(parent.map((_, i) => find(i)))].map(i => list[i]);
-      return representatives.slice(1).map((p, i) => ({ netId, a: representatives[i], b: p }));
+      const netLabelMembers: number[] = [];
+      for (const wire of doc().wires) {
+        if (visited.has(wire.id)) continue;
+        const group = wireGroup(doc().wires, wire.id);
+        for (const w of group) visited.add(w.id);
+        const reached = list.flatMap((pin, i) =>
+          group.some((w) =>
+            wirePoints(w)
+              .slice(1)
+              .some(
+                (p, j) =>
+                  distance(pin, project(pin, wirePoints(w)[j], p)) < 1e-6,
+              ),
+          )
+            ? [i]
+            : [],
+        );
+        union(reached);
+        if (
+          doc().labels.some(
+            (label) =>
+              label.netId === netId &&
+              group.some((w) =>
+                wirePoints(w)
+                  .slice(1)
+                  .some(
+                    (p, i) =>
+                      distance(
+                        anchorPoint(label.anchor) ?? label,
+                        project(
+                          anchorPoint(label.anchor) ?? label,
+                          wirePoints(w)[i],
+                          p,
+                        ),
+                      ) < 1e-6,
+                  ),
+              ),
+          )
+        )
+          netLabelMembers.push(...reached);
+      }
+      const labelled = list.flatMap((pin, i) =>
+        doc().labels.some(
+          (label) =>
+            label.netId === netId &&
+            (label.anchor
+              ? key(label.anchor) === key(pin.anchor)
+              : distance(pin, label) < 1e-6),
+        )
+          ? [i]
+          : [],
+      );
+      union([...labelled, ...netLabelMembers]);
+      const representatives = [...new Set(parent.map((_, i) => find(i)))].map(
+        (i) => list[i],
+      );
+      return representatives
+        .slice(1)
+        .map((p, i) => ({ netId, a: representatives[i], b: p }));
     });
   });
-  const diagnostics = () =>
-    components().flatMap((c) =>
+  const diagnostics = () => [
+    ...ncContacts(pcb() ?? { id: "", name: "", layers: [], images: [] }).map(
+      (id) => `${id}: NC copper contact`,
+    ),
+    ...components().flatMap((c) =>
       [
         !c.definition.symbol
           ? `${c.reference}: generic symbol needs identification`
+          : "",
+        c.definition.symbol?.units.some((u) =>
+          u.pins.some(
+            (pin) => !Object.values(c.definition.pinMap).includes(pin.number),
+          ),
+        )
+          ? `${c.reference}: symbol pins remain unmapped to PCB pads`
           : "",
         ...c.terminals.flatMap((t) => [
           !c.definition.pinMap[t.number] && c.definition.symbol
@@ -692,7 +956,8 @@ export function SchematicPanel(props: {
           t.netId && t.nc ? `${c.reference}.${t.number}: NC/net conflict` : "",
         ]),
       ].filter(Boolean),
-    );
+    ),
+  ];
   const selectedComponent = () =>
     components().find(
       (c) =>
@@ -773,18 +1038,20 @@ export function SchematicPanel(props: {
           aria-label="Schematic canvas"
           tabindex="0"
           viewBox={`${view().x} ${view().y} ${view().w} ${view().h}`}
-          preserveAspectRatio="none"
+          preserveAspectRatio="xMidYMid meet"
           onPointerDown={place}
           onPointerMove={move}
           onPointerUp={up}
           onPointerCancel={() => {
-            wireDrag = null; setWireDraft(null);
+            wireDrag = null;
+            setWireDraft(null);
             drag = null;
             pan = null;
             setDragOffset(null);
           }}
           onLostPointerCapture={() => {
-            wireDrag = null; setWireDraft(null);
+            wireDrag = null;
+            setWireDraft(null);
             drag = null;
             pan = null;
             setDragOffset(null);
@@ -807,6 +1074,31 @@ export function SchematicPanel(props: {
             });
           }}
           onKeyDown={(e) => {
+            if (
+              ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
+                e.key,
+              ) &&
+              selected().length
+            ) {
+              e.preventDefault();
+              edit((p) => {
+                for (const u of p.schematic?.units ?? [])
+                  if (selected().includes(u.id)) {
+                    u.x +=
+                      e.key === "ArrowLeft"
+                        ? -1.27
+                        : e.key === "ArrowRight"
+                          ? 1.27
+                          : 0;
+                    u.y +=
+                      e.key === "ArrowUp"
+                        ? -1.27
+                        : e.key === "ArrowDown"
+                          ? 1.27
+                          : 0;
+                  }
+              });
+            }
             if (e.key === "Escape") {
               cancel();
               setSelected([]);
@@ -875,7 +1167,74 @@ export function SchematicPanel(props: {
               />
             )}
           </For>
-          <Show when={selectedWire() && tool() === "select"}><For each={wirePoints(doc().wires.find(w => w.id === selectedWire()) ?? { id: "", points: [] }).slice(1, -1)}>{(p, i) => <rect aria-label={`Wire bend ${i() + 1}`} x={p.x - .7} y={p.y - .7} width="1.4" height="1.4" fill="var(--accent)" onPointerDown={e => { e.stopPropagation(); const previous = pcb(), w = doc().wires.find(w => w.id === selectedWire()); if (previous && w) { wireDrag = { previous, id: w.id, index: i() + 1 }; setWireDraft({ id: w.id, points: wirePoints(w) }); svg.setPointerCapture?.(e.pointerId); } }} />}</For></Show>
+          <Show when={selectedWire() && tool() === "select"}>
+            <For each={selectedWirePoints().slice(1, -1)}>
+              {(p, i) => (
+                <rect
+                  class="schematic-bend"
+                  role="button"
+                  tabindex="0"
+                  aria-label={`Wire bend ${i() + 1}`}
+                  x={p.x - 0.7}
+                  y={p.y - 0.7}
+                  width="1.4"
+                  height="1.4"
+                  fill="var(--accent)"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    const previous = pcb(),
+                      w = doc().wires.find((w) => w.id === selectedWire());
+                    if (previous && w) {
+                      wireDrag = { previous, id: w.id, index: i() + 1 };
+                      setWireDraft({ id: w.id, points: wirePoints(w) });
+                      svg.setPointerCapture?.(e.pointerId);
+                    }
+                  }}
+                  onDblClick={(e) => {
+                    e.stopPropagation();
+                    removeJoint(i());
+                  }}
+                  onKeyDown={(e) => {
+                    if (["Delete", "Backspace", "Enter", " "].includes(e.key)) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeJoint(i());
+                    }
+                  }}
+                >
+                  <title>
+                    Drag to move; double-click or press Delete to remove
+                  </title>
+                </rect>
+              )}
+            </For>
+            <For each={segmentMidpoints(selectedWirePoints())}>
+              {(m) => (
+                <g
+                  class="schematic-joint-add"
+                  role="button"
+                  tabindex="0"
+                  aria-label={`Add joint on segment ${m.seg + 1}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    addJoint(m.seg);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      addJoint(m.seg);
+                    }
+                  }}
+                >
+                  <circle cx={m.x} cy={m.y} r="0.9" />
+                  <path
+                    d={`M ${m.x - 0.45} ${m.y} H ${m.x + 0.45} M ${m.x} ${m.y - 0.45} V ${m.y + 0.45}`}
+                  />
+                </g>
+              )}
+            </For>
+          </Show>
           <For
             each={doc()
               .wires.flatMap((w) => [w.points[0], w.points.at(-1)!])
@@ -1039,8 +1398,8 @@ export function SchematicPanel(props: {
           <For each={doc().labels}>
             {(label) => (
               <text
-                x={label.x}
-                y={label.y}
+                x={(anchorPoint(label.anchor) ?? label).x}
+                y={(anchorPoint(label.anchor) ?? label).y}
                 font-size="2"
                 fill={
                   pcb()?.nets?.find((n) => n.id === label.netId)?.color ??
@@ -1150,14 +1509,18 @@ export function SchematicPanel(props: {
       </div>
       <Show when={pending()} keyed>
         {(state) => (
-          <div class="overlay">
+          <div class="overlay overlay--center">
             <section
               class="palette"
               role="dialog"
               aria-modal="true"
               aria-label="Join schematic nets"
               onKeyDown={(e) => {
-                if (e.key === "Escape") setPending(null);
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setPending(null);
+                  queueMicrotask(() => svg?.focus());
+                }
                 if (e.key === "Tab") {
                   const items = Array.from(
                     e.currentTarget.querySelectorAll<HTMLElement>(
@@ -1186,7 +1549,6 @@ export function SchematicPanel(props: {
                   cancel the complete edit.
                 </p>
                 <select
-                  autofocus
                   aria-label="Surviving net"
                   value={survivor()}
                   onChange={(e) => setSurvivor(e.currentTarget.value)}
@@ -1201,11 +1563,19 @@ export function SchematicPanel(props: {
                 </select>
               </div>
               <footer class="dialog-actions">
-                <button onClick={() => setPending(null)}>Cancel</button>
+                <button
+                  onClick={() => {
+                    setPending(null);
+                    queueMicrotask(() => svg?.focus());
+                  }}
+                >
+                  Cancel
+                </button>
                 <button
                   onClick={() => {
                     setPending(null);
                     state.apply(survivor());
+                    queueMicrotask(() => svg?.focus());
                   }}
                 >
                   Join nets

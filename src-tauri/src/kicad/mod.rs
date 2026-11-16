@@ -25,6 +25,8 @@ pub struct LibrarySource {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_name: Option<String>,
     pub id: String,
     pub name: String,
     pub source_id: String,
@@ -63,6 +65,11 @@ pub fn load(path: &Path) -> ProjectResult<Registry> {
 }
 pub fn save(path: &Path, registry: &Registry) -> ProjectResult<()> {
     let text = serde_json::to_vec(registry).map_err(|e| sexpr::error(&e.to_string()))?;
+    if text.len() > 128 * 1024 * 1024 {
+        return Err(sexpr::error(
+            "Local library registry exceeds 128 MiB; remove unused sources or definitions.",
+        ));
+    }
     atomic(path, &text)
 }
 pub fn atomic(path: &Path, bytes: &[u8]) -> ProjectResult<()> {
@@ -229,7 +236,7 @@ pub fn validate_definition(d: &ComponentDefinition) -> ProjectResult<()> {
             }
         }
         for g in &p.primitives {
-            validate_graphic(g)?;
+            validate_pad_primitive(g)?;
         }
     }
     for g in &d.footprint.graphics {
@@ -277,6 +284,15 @@ fn validate_graphic(g: &Graphic) -> ProjectResult<()> {
             .any(|p| !p.x.is_finite() || !p.y.is_finite())
     {
         return Err(sexpr::error("Invalid graphics geometry."));
+    }
+    Ok(())
+}
+pub fn validate_pad_primitive(g: &Graphic) -> ProjectResult<()> {
+    validate_graphic(g)?;
+    if !matches!(g.kind.as_str(), "line" | "circle" | "rect" | "polyline")
+        || (g.kind != "line" && !g.fill)
+    {
+        return Err(sexpr::error("Unsupported electrical custom-pad primitive (curves and unfilled closed primitives are not supported)."));
     }
     Ok(())
 }
@@ -328,6 +344,16 @@ pub fn validate_pcb(pcb: &crate::project::schema::VisualPcb, errors: &mut Vec<St
             );
         }
     }
+    for trace in &pcb.traces {
+        for anchor in [&trace.start_pad, &trace.end_pad].into_iter().flatten() {
+            if !pcb.components.iter().any(|c| {
+                c.id == anchor.component_id
+                    && c.terminals.iter().any(|t| t.number == anchor.terminal)
+            }) {
+                errors.push("Dangling trace pad anchor".into());
+            }
+        }
+    }
     if let Some(s) = &pcb.schematic {
         let mut item_ids = std::collections::HashSet::new();
         for u in &s.units {
@@ -336,6 +362,16 @@ pub fn validate_pcb(pcb: &crate::project::schema::VisualPcb, errors: &mut Vec<St
                 || ![u.x, u.y, u.rotation].iter().all(|v| v.is_finite())
             {
                 errors.push("Invalid schematic unit".into());
+            }
+            if !pcb.components.iter().any(|c| {
+                c.id == u.component_id
+                    && c.definition.symbol.as_ref().map_or(u.unit == 1, |symbol| {
+                        symbol.units.iter().any(|unit| {
+                            unit.unit == u.unit && unit.body_style == u.body_style.unwrap_or(1)
+                        })
+                    })
+            }) {
+                errors.push("Schematic unit refers to missing symbol unit/body style".into());
             }
         }
         for w in &s.wires {
@@ -366,6 +402,13 @@ pub fn validate_pcb(pcb: &crate::project::schema::VisualPcb, errors: &mut Vec<St
                 || !nets.contains(l.net_id.as_str())
             {
                 errors.push("Invalid schematic net label".into());
+            }
+            if l.anchor.as_ref().is_some_and(|a| {
+                !pcb.components.iter().any(|c| {
+                    c.id == a.component_id && c.terminals.iter().any(|t| t.number == a.terminal)
+                })
+            }) {
+                errors.push("Dangling schematic label anchor".into());
             }
         }
     }

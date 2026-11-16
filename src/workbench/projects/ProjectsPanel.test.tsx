@@ -160,9 +160,87 @@ describe("open project card", () => {
     expect(screen.getByText("Updated 2026-11-15 11:45")).toBeTruthy();
     expect(screen.getByTitle(PATH).textContent).toContain(PATH);
     const stats = screen.getByLabelText("Project statistics");
+    expect(stats.textContent).toContain("Board mapping");
     expect(stats.textContent).toContain("Layers2");
     expect(stats.textContent).toContain("Components2");
+    expect(stats.textContent).toContain("Visual editor");
+    expect(stats.textContent).toContain("Photographs0");
+    expect(stats.textContent).toContain("Traces0");
     expect(stats.textContent).toContain("Asset storage8.0 KB");
+  });
+
+  it("displays visual editor statistics when visual editor data is present", async () => {
+    const doc = seededDoc();
+    doc.visualEditor = {
+      activePcbId: "pcb-1",
+      pcbs: [
+        {
+          id: "pcb-1",
+          name: "Main PCB",
+          layers: ["l1", "l2"],
+          images: [
+            {
+              id: "img1",
+              name: "Top.jpg",
+              assetHash: "a".repeat(64),
+              width: 1000,
+              height: 800,
+              x: 0,
+              y: 0,
+              flipH: false,
+              flipV: false,
+              visible: true,
+              opacity: 1,
+              locked: false,
+            },
+          ],
+          traces: [
+            {
+              id: "t1",
+              layerId: "l1",
+              points: [
+                { x: 0, y: 0 },
+                { x: 10, y: 10 },
+              ],
+              width: 2,
+            },
+            {
+              id: "t2",
+              layerId: "l2",
+              points: [
+                { x: 10, y: 10 },
+                { x: 20, y: 20 },
+              ],
+              width: 2,
+            },
+          ],
+          vias: [{ id: "v1", x: 10, y: 10, diameter: 0.8, drill: 0.4 }],
+          zones: [
+            {
+              id: "z1",
+              layerId: "l1",
+              points: [
+                { x: 0, y: 0 },
+                { x: 50, y: 0 },
+                { x: 50, y: 50 },
+              ],
+            },
+          ],
+          nets: [
+            { id: "net1", name: "GND", color: "#00ff00" },
+            { id: "net2", name: "VCC", color: "#ff0000" },
+          ],
+        },
+      ],
+    };
+    const store = await makeStore(doc);
+    panel(store);
+    const stats = screen.getByLabelText("Project statistics");
+    expect(stats.textContent).toContain("Photographs1");
+    expect(stats.textContent).toContain("Traces2");
+    expect(stats.textContent).toContain("Vias1");
+    expect(stats.textContent).toContain("Zones1");
+    expect(stats.textContent).toContain("Nets2");
   });
 
   it("falls back to an em dash for unparseable timestamps", async () => {
@@ -170,7 +248,7 @@ describe("open project card", () => {
     doc.createdAt = "not a date";
     const store = await makeStore(doc);
     panel(store);
-    expect(screen.getByText("Created —")).toBeTruthy();
+    expect(screen.getByText("Created -")).toBeTruthy();
     expect(screen.getByText("Updated 2026-11-15 11:45")).toBeTruthy();
   });
 

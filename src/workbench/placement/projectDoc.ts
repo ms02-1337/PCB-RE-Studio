@@ -86,7 +86,7 @@ export interface Component {
   imageHashes?: string[];
   /** Display names for component images keyed by asset sha256. Invariant
    * (validated in Rust): at most 64 entries, 64-char lowercase-hex keys,
-   * values at most 200 chars — empty string clears a name; the UI passes the
+   * values at most 200 chars - empty string clears a name; the UI passes the
    * complete record and absence leaves it unchanged. Keys do not create blob
    * references: image liveness still flows through imageHashes/imageHash. */
   imageNames?: Record<string, string>;

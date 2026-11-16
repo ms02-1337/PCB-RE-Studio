@@ -10,6 +10,7 @@ import {
   invertPerspective,
   isConvexQuad,
   isInvertiblePerspective,
+  mirrorVisualImages,
   composeWarpLeft,
   effectiveVisualTransform,
   imageAnchor,
@@ -267,6 +268,21 @@ describe("normalizeRotation / snap15 / levelLine (AC10)", () => {
     }
     expect(levelLine({ x: 5, y: 5 }, { x: 5, y: 5 })).toBeNull();
   });
+});
+
+it.each(["horizontal", "vertical"] as const)("preserves eight-image registration under a shared %s reflection", axis => {
+  const images = Array.from({ length: 8 }, (_, i) => image({ id: String(i), width: 200 + i * 31, height: 100 + i * 19, x: i * 13, y: -i * 7, rotation: i * 11, scaleX: 1 + i / 10, scaleY: 1 - i / 20, flipH: i % 2 === 0, crop: { x: 5, y: 7, w: 150, h: 70 }, warp: { a: 1 + i / 20, b: i / 50, c: -i / 70, d: 1 + i / 30 }, visible: i !== 7 }));
+  const bounds = worldAabb(images), cx = (bounds.left + bounds.right) / 2, cy = (bounds.top + bounds.bottom) / 2;
+  const next = mirrorVisualImages(images, axis)!;
+  for (const landmark of [{ x: 20, y: 30 }, { x: 70, y: 80 }, { x: 130, y: 55 }]) {
+    images.forEach((photo, i) => close(sourceToWorld(next[i], worldToSource(photo, landmark)), axis === "horizontal" ? 2 * cx - landmark.x : landmark.x, axis === "vertical" ? 2 * cy - landmark.y : landmark.y));
+  }
+  const restored = mirrorVisualImages(next, axis)!;
+  images.forEach((photo, i) => { const p = { x: 30, y: 40 }, w = sourceToWorld(photo, p); close(sourceToWorld(restored[i], p), w.x, w.y); });
+});
+it("rejects an entire stack with a hidden locked photo or invalid results", () => {
+  expect(mirrorVisualImages([image(), image({ locked: true, visible: false })], "horizontal")).toBeNull();
+  expect(mirrorVisualImages([image({ x: Infinity })], "horizontal")).toBeNull();
 });
 
 // ---------------------------------------------------------------------------

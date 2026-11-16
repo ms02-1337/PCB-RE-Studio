@@ -1,4 +1,4 @@
-﻿import { padContours,padHole } from "../electrical/padGeometry";
+﻿import { padContours, padHole } from "../electrical/padGeometry";
 import { padPoint } from "../electrical/domain";
 import type { Point } from "../placement/projectDoc";
 import {
@@ -117,10 +117,47 @@ export function validPolygon(points: Point[]): boolean {
 }
 export interface PadConductor extends CopperTrace {
   padTerminal: string;
+  padCenter: Point;
+  attachment: { componentId: string; terminal: string };
   hole?: Point[];
 }
 export type Conductor = CopperTrace | CopperVia | PadConductor;
-export function padConductors(pcb:VisualPcb):PadConductor[]{return(pcb.components??[]).flatMap(c=>c.definition.footprint.pads.flatMap((p,i)=>{if(!p.number||p.type==='np_thru_hole'||(!p.plated&&p.drill))return[];const terminal=c.terminals.find(t=>t.number===p.number);if(!terminal||terminal.nc)return[];const layers=p.plated&&p.drill?pcb.layers:[c.layerId];const hole=padHole(p).map(v=>padPoint(c,v,pcb.pxPerMm??1));return padContours(p).flatMap((contour,k)=>{const pts=contour.map(v=>padPoint(c,v,pcb.pxPerMm??1));if(pts.length<3)return[];return layers.map(layerId=>({id:c.id+':'+p.number+':'+layerId+':'+i+':'+k,padTerminal:c.id+':'+p.number,layerId,points:[...pts,pts[0]],hole,width:0,get netId(){return terminal.netId;},set netId(value:string|undefined){terminal.netId=value;}}));});}));}interface Bounds {
+export function padConductors(
+  pcb: VisualPcb,
+  includeNc = false,
+): PadConductor[] {
+  return (pcb.components ?? []).flatMap((c) =>
+    c.definition.footprint.pads.flatMap((p, i) => {
+      if (!p.number || p.type === "np_thru_hole" || (!p.plated && p.drill))
+        return [];
+      const terminal = c.terminals.find((t) => t.number === p.number);
+      if (!terminal || (!includeNc && terminal.nc)) return [];
+      const layers = p.plated && p.drill ? pcb.layers : [c.layerId];
+      const hole = padHole(p).map((v) => padPoint(c, v, pcb.pxPerMm ?? 1));
+      return padContours(p).flatMap((contour, k) => {
+        const pts = contour.map((v) => padPoint(c, v, pcb.pxPerMm ?? 1));
+        if (pts.length < 3) return [];
+        return layers.map((layerId) => ({
+          id: c.id + ":" + p.number + ":" + layerId + ":" + i + ":" + k,
+          padTerminal: c.id + ":" + p.number,
+          attachment: { componentId: c.id, terminal: p.number },
+          padCenter: padPoint(c, p, pcb.pxPerMm ?? 1),
+          layerId,
+          points: [...pts, pts[0]],
+          hole,
+          width: 0,
+          get netId() {
+            return terminal.netId;
+          },
+          set netId(value: string | undefined) {
+            terminal.netId = value;
+          },
+        }));
+      });
+    }),
+  );
+}
+interface Bounds {
   left: number;
   right: number;
   top: number;
@@ -173,9 +210,25 @@ export function touches(a: Conductor, b: Conductor): boolean {
       o = p === a ? b : a;
     if ("points" in o) {
       if (p.layerId !== o.layerId) return false;
-      if (o.points.some((q) => inside(q, p.points) && !(p.hole?.length&&inside(q,p.hole)))) return true;
+      if (
+        "padTerminal" in o &&
+        p.points.some(
+          (q) =>
+            inside(q, o.points) &&
+            !(o.hole?.length && inside(q, o.hole)) &&
+            !(p.hole?.length && inside(q, p.hole)),
+        )
+      )
+        return true;
+      if (
+        o.points.some(
+          (q) => inside(q, p.points) && !(p.hole?.length && inside(q, p.hole)),
+        )
+      )
+        return true;
     } else if (
-      inside(o, p.points) && !(p.hole?.length&&inside(o,p.hole)) &&
+      inside(o, p.points) &&
+      !(p.hole?.length && inside(o, p.hole)) &&
       !p.points.every((q) => distance(q, o) < o.drill / 2)
     )
       return true;
@@ -251,7 +304,15 @@ export function connected(pcb: VisualPcb, seeds: string[]): Conductor[] {
   );
   const index = copperIndex(pcb);
   for (let i = 0; i < result.length; i++)
-    for (const c of [...index.query(bounds(result[i])),...all.filter(c=>"padTerminal" in c && "padTerminal" in result[i] && c.padTerminal===(result[i] as PadConductor).padTerminal)])
+    for (const c of [
+      ...index.query(bounds(result[i])),
+      ...all.filter(
+        (c) =>
+          "padTerminal" in c &&
+          "padTerminal" in result[i] &&
+          c.padTerminal === (result[i] as PadConductor).padTerminal,
+      ),
+    ])
       if (!result.some((r) => r.id === c.id) && touches(result[i], c))
         result.push(c);
   return result;
@@ -303,4 +364,41 @@ export function zoneCensus(
   return { traces, vias };
 }
 
+export function ncContacts(pcb: VisualPcb): string[] {
+  const nc = new Set(
+    (pcb.components ?? []).flatMap((c) =>
+      c.terminals.filter((t) => t.nc).map((t) => c.id + ":" + t.number),
+    ),
+  );
+  const pads = padConductors(pcb, true).filter((p) => nc.has(p.padTerminal));
+  return [
+    ...new Set(
+      pads
+        .filter((p) =>
+          [
+            ...(pcb.traces ?? []),
+            ...(pcb.vias ?? []),
+            ...padConductors(pcb),
+          ].some((c) => c.id !== p.id && touches(p, c)),
+        )
+        .map((p) => p.padTerminal),
+    ),
+  ];
+}
 
+/** Open ends use physical contact, independent of logical net assignments. */
+export function openTraceEnds(pcb: VisualPcb): { traceId: string; layerId: string; point: Point }[] {
+  const index = copperIndex(pcb);
+  return (pcb.traces ?? []).flatMap(trace => {
+    if (trace.points.length < 2) return [];
+    return [trace.points[0], trace.points[trace.points.length - 1]].flatMap(point => {
+      const radius = trace.width / 2;
+      const tip: CopperTrace = { ...trace, points: [point, point] };
+      const contact = index.query({ left: point.x-radius, right: point.x+radius, top: point.y-radius, bottom: point.y+radius })
+        .some(other => other.id !== trace.id && touches(tip, other));
+      // A closed loop has no open ends.
+      return contact || distance(trace.points[0], trace.points[trace.points.length-1]) < 1e-8
+        ? [] : [{ traceId: trace.id, layerId: trace.layerId, point }];
+    });
+  });
+}

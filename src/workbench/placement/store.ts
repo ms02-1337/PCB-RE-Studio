@@ -1,4 +1,4 @@
-﻿import { createVisualActions } from "../visual/actions";
+import { createVisualActions } from "../visual/actions";
 import { initialVisualEditor } from "../visual/model";
 // Placement store: document slice, UI slice, and the autosave scheduler
 // (2s debounce, promise-chain queue so saves never overlap, trailing save,
@@ -100,8 +100,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/** Typed validation failures can never succeed on a retry timer — they need a
- * document change or an explicit save — so autosave must not loop on them. */
+/** Typed validation failures can never succeed on a retry timer - they need a
+ * document change or an explicit save - so autosave must not loop on them. */
 function isValidationError(error: unknown): boolean {
   return error instanceof ProjectBridgeError && error.code === "invalid_data";
 }
@@ -360,7 +360,7 @@ export function createPlacementStore(
       addBoard({ name: fileBaseName(path), asset, width, height });
     });
 
-  /** Exports a standalone HTML report. Never touches saveState/dirty — the
+  /** Exports a standalone HTML report. Never touches saveState/dirty - the
    * document did not change, so the transient status message is enough. */
   const exportHtmlFlow = () =>
     guarded(async () => {
@@ -416,8 +416,8 @@ export function createPlacementStore(
       clearProjectState();
     });
 
-  /** Opens a recent project by path. Unsaved work is flushed first —
-   * nothing is discarded — and a failed flush or a failed open keeps the
+  /** Opens a recent project by path. Unsaved work is flushed first -
+   * nothing is discarded - and a failed flush or a failed open keeps the
    * current project open (openProject only resets on success). */
   const openRecentFlow = (path: string) =>
     guarded(async () => {
@@ -447,6 +447,7 @@ export function createPlacementStore(
     if (!current) return;
     const next: ProjectDoc = JSON.parse(JSON.stringify(current)) as ProjectDoc;
     change(next);
+    const markingIds=new Set(next.components.map(c=>c.id));for(const pcb of next.visualEditor?.pcbs??[])for(const c of pcb.components??[])if(c.markingId&&!markingIds.has(c.markingId))delete c.markingId;
     if (JSON.stringify(next) === JSON.stringify(current)) return;
     // Asset GC runs on save. History never resurrects blobs that may have
     // been collected: crossing an asset-reference boundary clears history.
@@ -622,7 +623,7 @@ export function createPlacementStore(
 
   /** Commits the pending crop rect to the active board: clamps to the image
    * bounds and rejects empty rectangles (the draft stays for another try).
-   * A locked picture rejects the crop outright — the draft survives until
+   * A locked picture rejects the crop outright - the draft survives until
    * unlocked or cancelled. */
   function applyCrop(): void {
     const active = activeBoard();
@@ -994,5 +995,3 @@ export function createPlacementStore(
 }
 
 export type PlacementStore = ReturnType<typeof createPlacementStore>;
-
-

@@ -50,6 +50,19 @@ fn graphic(e: &Expr) -> Option<Graphic> {
         points.push(xy(e.child("at")));
     }
     Some(Graphic {
+        rotation: if kind == "text" {
+            Some(e.child("at").map_or(0., |a| a.num(3)))
+        } else {
+            None
+        },
+        font_size: e
+            .child("effects")
+            .and_then(|e| e.child("font"))
+            .and_then(|f| f.child("size"))
+            .map(|s| FontSize {
+                width: s.num(1),
+                height: s.num(2),
+            }),
         kind: kind.into(),
         points,
         width: e.child("width").map_or_else(
@@ -77,7 +90,7 @@ fn checked_numbers(e: &Expr) -> ProjectResult<()> {
             checked_numbers(child)?;
         }
     }
-    let numeric = matches!(
+    if matches!(
         e.tag(),
         "at" | "start"
             | "end"
@@ -88,15 +101,20 @@ fn checked_numbers(e: &Expr) -> ProjectResult<()> {
             | "width"
             | "length"
             | "roundrect_rratio"
-    );
-    if numeric {
+    ) {
         for a in e.list().iter().skip(1) {
-            if let Expr::Atom(s) = a {
-                if let Ok(n) = s.parse::<f64>() {
-                    if !n.is_finite() {
-                        return Err(sexpr::error("Non-finite library coordinate."));
-                    }
-                }
+            if matches!(a, Expr::List(_)) {
+                continue;
+            }
+            let text = a.atom();
+            if e.tag() == "at" && matches!(text, "unlocked" | "hide") {
+                continue;
+            }
+            let number = text
+                .parse::<f64>()
+                .map_err(|_| sexpr::error("Malformed library coordinate."))?;
+            if !number.is_finite() || number.abs() > 1e9 {
+                return Err(sexpr::error("Non-finite or excessive library coordinate."));
             }
         }
     }
@@ -142,10 +160,10 @@ pub fn footprint(raw: &str, source: &str) -> ProjectResult<Footprint> {
             let mut primitives = vec![];
             if let Some(p) = e.child("primitives") {
                 for c in p.list().iter().skip(1) {
-                    primitives.push(
-                        graphic(c)
-                            .ok_or_else(|| sexpr::error("Unsupported custom pad primitive."))?,
-                    );
+                    let primitive = graphic(c)
+                        .ok_or_else(|| sexpr::error("Unsupported custom pad primitive."))?;
+                    super::validate_pad_primitive(&primitive)?;
+                    primitives.push(primitive);
                 }
             }
             if shape == "trapezoid" {
@@ -154,6 +172,10 @@ pub fn footprint(raw: &str, source: &str) -> ProjectResult<Footprint> {
                 ));
             }
             let pad = Pad {
+                anchor: e
+                    .child("options")
+                    .and_then(|o| o.child("anchor"))
+                    .map(|a| a.val(1).into()),
                 pad_type: Some(e.val(2).into()),
                 number: e.val(1).into(),
                 x: at.map_or(0., |a| a.num(1)),
@@ -373,5 +395,38 @@ mod serializer_tests {
         assert_eq!(first.units, second.units);
         assert!(first.raw.contains("(pin passive line"));
         assert!(first.raw.contains("\"01\""));
+    }
+}
+#[cfg(test)]
+mod strict_tests {
+    use super::*;
+    #[test]
+    fn malformed_numbers_and_unit_bombs_reject() {
+        assert!(footprint(
+            r#"(footprint "bad" (pad "1" smd rect (at wrong 1) (size 1 1) (layers "F.Cu")))"#,
+            "x"
+        )
+        .is_err());
+        assert!(symbol(
+            r#"(kicad_symbol_lib (symbol "bad" (symbol "bad_999999999_1")))"#,
+            "bad",
+            "x"
+        )
+        .is_err());
+    }
+    #[test]
+    fn unsupported_electrical_geometry_is_explicit() {
+        assert!(footprint(
+            r#"(footprint "bad" (pad "1" smd trapezoid (size 1 1) (layers "F.Cu")))"#,
+            "x"
+        )
+        .is_err());
+        assert!(footprint(r#"(footprint "bad" (pad "1" smd custom (size 1 1) (layers "F.Cu") (primitives (gr_arc (start 0 0) (mid 1 1) (end 2 0) (width 0.2)))))"#,"x").is_err());
+    }
+    #[test]
+    fn custom_anchor_preserved() {
+        let f=footprint(r#"(footprint "custom" (pad "1" smd custom (at 1 2 37) (size 1 1) (layers "F.Cu") (options (anchor circle)) (primitives (gr_poly (pts (xy 0 0) (xy 1 0) (xy 0 1)) (width 0) (fill yes)))))"#,"x").unwrap();
+        assert_eq!(f.pads[0].anchor.as_deref(), Some("circle"));
+        assert_eq!(f.pads[0].primitives[0].points.len(), 3);
     }
 }

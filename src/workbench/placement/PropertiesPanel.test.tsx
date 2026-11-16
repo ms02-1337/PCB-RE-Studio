@@ -101,7 +101,7 @@ it("offers the Projects tab when no project is open", () => {
   ));
   expect(screen.getByText("No project open.")).toBeTruthy();
   expect(screen.getByText("Projects are available in the desktop app.")).toBeTruthy();
-  // Lifecycle buttons live in the Projects tab now — only the link remains.
+  // Lifecycle buttons live in the Projects tab now - only the link remains.
   expect(screen.queryByRole("button", { name: "New project…" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Open…" })).toBeNull();
   const openTab = screen.getByRole("button", { name: "Open the Projects tab" }) as HTMLButtonElement;
@@ -113,7 +113,7 @@ it("offers the Projects tab when no project is open", () => {
 it("shows board stats when nothing is selected", async () => {
   const store = await makeStore(seededDoc());
   panel(store);
-  expect(screen.getByText(/Front — 1024 × 768 px/)).toBeTruthy();
+  expect(screen.getByText(/Front - 1024 × 768 px/)).toBeTruthy();
   expect(screen.getByText(/0 components marked/)).toBeTruthy();
   expect(screen.getByText(/Draw a rect, ellipse, or polygon/)).toBeTruthy();
 });
@@ -171,7 +171,7 @@ it("locks disable every field except the lock toggle", async () => {
   });
   const store = await makeStore(doc, "c1");
   panel(store);
-  expect(screen.getByText("Component is locked — unlock to edit.")).toBeTruthy();
+  expect(screen.getByText("Component is locked - unlock to edit.")).toBeTruthy();
   expect((screen.getByLabelText("Part number") as HTMLInputElement).disabled).toBe(true);
   expect((screen.getByLabelText("Status") as HTMLSelectElement).disabled).toBe(true);
   // The lock button reads "Locked" while locked…
@@ -218,7 +218,7 @@ describe("copy field buttons", () => {
     stubClipboard(writeText);
     const store = await makeStore(copyableDoc(true), "c1");
     panel(store);
-    // Exactly the five copyable fields gain buttons — no others.
+    // Exactly the five copyable fields gain buttons - no others.
     expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(5);
     const expected: Array<[string, string]> = [
       ["Part number", "LM358"],
@@ -618,7 +618,7 @@ describe("board-picture inspector", () => {
     const store = await makeStore(seededDoc());
     store.setBoardSelected(true);
     panel(store);
-    expect(screen.getByText("Board picture selected — transform how it is displayed.")).toBeTruthy();
+    expect(screen.getByText("Board picture selected - transform how it is displayed.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Rotate 90° CW" }));
     expect(store.doc()!.boards[0].rotation).toBe(90);
     fireEvent.click(screen.getByRole("button", { name: "Rotate 90° CW" }));
@@ -643,7 +643,7 @@ describe("board-picture inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lock" }));
     const locked = screen.getByRole("button", { name: "Locked" }) as HTMLButtonElement;
     expect(locked.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByText("Picture is locked — unlock to transform.")).toBeTruthy();
+    expect(screen.getByText("Picture is locked - unlock to transform.")).toBeTruthy();
     for (const name of [
       "Rotate 90° CCW",
       "Rotate 90° CW",

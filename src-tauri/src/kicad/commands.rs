@@ -161,11 +161,16 @@ pub async fn kicad_rescan(app: tauri::AppHandle, source_id: String) -> ProjectRe
                         if path.extension().is_some_and(|e| e == "kicad_mod") {
                             entries.push(LibraryEntry {
                                 id: parser::hash(&source_path),
-                                name: path
-                                    .file_stem()
-                                    .unwrap_or_default()
-                                    .to_string_lossy()
-                                    .into_owned(),
+                                symbol_name: None,
+                                name: format!(
+                                    "{}:{}",
+                                    path.parent()
+                                        .and_then(Path::file_name)
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .trim_end_matches(".pretty"),
+                                    path.file_stem().unwrap_or_default().to_string_lossy()
+                                ),
                                 source_id: source.id.clone(),
                                 kind: "footprint".into(),
                                 path: source_path,
@@ -176,7 +181,13 @@ pub async fn kicad_rescan(app: tauri::AppHandle, source_id: String) -> ProjectRe
                                     for name in names {
                                         entries.push(LibraryEntry {
                                             id: parser::hash(&format!("{source_path}::{name}")),
-                                            name,
+                                            name: format!(
+                                                "{}:{name}",
+                                                path.file_stem()
+                                                    .unwrap_or_default()
+                                                    .to_string_lossy()
+                                            ),
+                                            symbol_name: Some(name),
                                             source_id: source.id.clone(),
                                             kind: "symbol".into(),
                                             path: source_path.clone(),
@@ -201,6 +212,9 @@ pub async fn kicad_rescan(app: tauri::AppHandle, source_id: String) -> ProjectRe
             registry(
                 &app,
                 |r| {
+                    if !r.sources.iter().any(|s| s.id == source.id) {
+                        return Ok(());
+                    }
                     r.entries.retain(|e| e.source_id != source.id);
                     r.entries.extend(entries);
                     if let Some(s) = r.sources.iter_mut().find(|s| s.id == source.id) {
@@ -321,7 +335,11 @@ pub async fn kicad_symbol(app: tauri::AppHandle, id: String) -> ProjectResult<Sy
             },
             false,
         )?;
-        parser::symbol(&read(Path::new(&entry.path))?, &entry.name, &entry.name)
+        parser::symbol(
+            &read(Path::new(&entry.path))?,
+            entry.symbol_name.as_deref().unwrap_or(&entry.name),
+            &entry.name,
+        )
     })
     .await
 }
@@ -378,6 +396,10 @@ pub fn export_files(path: &Path, files: Vec<ExportFile>) -> ProjectResult<()> {
     let mut names = std::collections::HashSet::new();
     for file in &files {
         if file.name.is_empty()
+            || file
+                .name
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
             || file.name.contains('\\')
             || file.name.contains(':')
             || Path::new(&file.name)
@@ -404,4 +426,18 @@ pub fn export_files(path: &Path, files: Vec<ExportFile>) -> ProjectResult<()> {
 #[tauri::command]
 pub async fn kicad_export_files(path: String, files: Vec<ExportFile>) -> ProjectResult<()> {
     blocking(move || export_files(Path::new(&path), files)).await
+}
+#[tauri::command]
+pub async fn kicad_export_text(path: String, text: String) -> ProjectResult<()> {
+    blocking(move || {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err(ProjectError::invalid_path());
+        }
+        if text.len() > 128 * 1024 * 1024 {
+            return Err(sexpr::error("Text export exceeds size limit."));
+        }
+        atomic(&path, text.as_bytes())
+    })
+    .await
 }

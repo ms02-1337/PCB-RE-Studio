@@ -1,0 +1,75 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@solidjs/testing-library";
+import { ComponentManager } from "./ComponentManager";
+import { kicad, type ComponentDefinition } from "../../bridge/kicad";
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false }));
+const definition: ComponentDefinition = { id:"d", name:"Connector", partName:"P", value:"V", referencePrefix:"J", pinMap:{"1":"1"}, footprint:{id:"fp",name:"Connector footprint",source:"",raw:"",graphics:[],diagnostics:[],pads:[{number:"1",x:0,y:0,width:1,height:1,rotation:0,shape:"rect",plated:false,layers:["F.Cu"]}]} };
+afterEach(() => {vi.restoreAllMocks();vi.unstubAllGlobals();});
+function setup(reason?: string, initial: ComponentDefinition | null = definition, isInUse?: (d: ComponentDefinition) => boolean, onClose = vi.fn()) {
+ vi.spyOn(kicad,"sources").mockResolvedValue([]); vi.spyOn(kicad,"definitions").mockResolvedValue([definition]); vi.spyOn(kicad,"search").mockImplementation(async kind => ({entries:[{id:kind,name:kind,sourceId:"s",kind}],total:1})); vi.spyOn(kicad,"footprint").mockResolvedValue(definition.footprint); vi.spyOn(kicad,"symbol").mockResolvedValue({id:"sym",name:"Library symbol",source:"",raw:"",reference:"J",diagnostics:[],units:[{unit:1,bodyStyle:1,graphics:[],pins:[]}]}); vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(null);
+ const place=vi.fn(); render(() => <ComponentManager initial={initial ?? undefined} onClose={onClose} onPlace={place} placementUnavailableReason={reason} isInUse={isInUse} />); return Object.assign(place, { onClose });
+}
+it("retains draft across configuration and shows previews together", () => {
+ setup(); fireEvent.input(screen.getByLabelText("Component name"),{target:{value:"Edited"}});
+ fireEvent.click(screen.getByRole("button",{name:"Configuration"})); expect(screen.getByRole("heading",{name:"KiCad libraries"})).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Back to component"}));
+ expect((screen.getByLabelText("Component name") as HTMLInputElement).value).toBe("Edited");
+ expect(screen.getByLabelText("Footprint preview").closest(".component-previews")).toBe(screen.getByLabelText("Symbol preview").closest(".component-previews"));
+});
+it("blocks Place with a visible calibration reason", () => { const place=setup("Calibrate the PCB before placement."); const button=screen.getByRole("button",{name:"Place"}) as HTMLButtonElement; expect(button.disabled).toBe(true); fireEvent.click(button); expect(place).not.toHaveBeenCalled(); expect(screen.getByText("Calibrate the PCB before placement.")).toBeTruthy(); });
+it("loads saved components through a table and saves before placement", async () => { const place=setup(undefined, null); vi.spyOn(kicad,"saveDefinition").mockResolvedValue(); fireEvent.click(screen.getByRole("button",{name:"Use saved component"})); await waitFor(() => expect(screen.getByRole("button",{name:"Load"})).toBeTruthy()); fireEvent.click(screen.getByRole("button",{name:"Load"})); fireEvent.click(screen.getByRole("button",{name:"Place"})); await waitFor(() => expect(place).toHaveBeenCalledWith(definition)); });
+async function newFootprint() { fireEvent.click(screen.getByRole("button",{name:"Create new component"})); expect((screen.getByRole("button",{name:"Next"}) as HTMLButtonElement).disabled).toBe(true); await waitFor(() => expect(screen.getByRole("button",{name:"Use footprint"})).toBeTruthy()); fireEvent.click(screen.getByRole("button",{name:"Use footprint"})); await waitFor(() => expect((screen.getByRole("button",{name:"Next"}) as HTMLButtonElement).disabled).toBe(false)); fireEvent.click(screen.getByRole("button",{name:"Next"})); }
+it("guides a new generic-symbol component to mapping and save-only",async()=>{ setup(undefined, null); expect(kicad.search).not.toHaveBeenCalled(); vi.spyOn(kicad,"saveDefinition").mockResolvedValue(); await newFootprint(); expect(screen.getByRole("heading",{name:"Generic symbol"})).toBeTruthy(); fireEvent.click(screen.getByRole("button",{name:"Next"})); expect(screen.getByLabelText("Map pad 1")).toBeTruthy(); fireEvent.click(screen.getByRole("button",{name:"Save to library"})); await waitFor(()=>expect(screen.getByText("Component saved to library.")).toBeTruthy()); });
+it("resets mappings on library symbol selection and clears it after a footprint change",async()=>{setup(undefined, null);await newFootprint();await waitFor(()=>expect(screen.getByRole("button",{name:"Use symbol"})).toBeTruthy());fireEvent.click(screen.getByRole("button",{name:"Use symbol"}));await waitFor(()=>expect(screen.getByRole("heading",{name:"Library symbol"})).toBeTruthy());fireEvent.click(screen.getByRole("button",{name:"Next"}));expect((screen.getByLabelText("Map pad 1") as HTMLSelectElement).value).toBe("");fireEvent.click(screen.getByRole("button",{name:"Back"}));fireEvent.click(screen.getByRole("button",{name:"Back"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Use footprint"})).toBeTruthy());fireEvent.click(screen.getByRole("button",{name:"Use footprint"}));await waitFor(()=>expect(screen.getByRole("heading",{name:"Generic symbol"})).toBeTruthy());});
+
+it("keeps the footprint step blocked after a failed library load",async()=>{setup(undefined,null);vi.mocked(kicad.footprint).mockRejectedValue(new Error("Cannot read footprint"));fireEvent.click(screen.getByRole("button",{name:"Create new component"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Use footprint"})).toBeTruthy());fireEvent.click(screen.getByRole("button",{name:"Use footprint"}));await waitFor(()=>expect(screen.getByRole("alert").textContent).toBe("Cannot read footprint"));expect((screen.getByRole("button",{name:"Next"}) as HTMLButtonElement).disabled).toBe(true);expect(screen.queryByRole("button",{name:"Place"})).toBeNull();});
+it("prevents duplicate saves and stays in review after save failure",async()=>{setup();let reject!: (e:Error)=>void;vi.spyOn(kicad,"saveDefinition").mockImplementation(()=>new Promise((_,r)=>{reject=r;}));const save=screen.getByRole("button",{name:"Save to library"});fireEvent.click(save);fireEvent.click(save);expect(kicad.saveDefinition).toHaveBeenCalledTimes(1);expect((save as HTMLButtonElement).disabled).toBe(true);reject(new Error("Save failed"));await waitFor(()=>expect(screen.getByRole("alert").textContent).toBe("Save failed"));expect((screen.getByRole("button",{name:"Save to library"}) as HTMLButtonElement).disabled).toBe(false);expect(screen.getByLabelText("Component name")).toBeTruthy();});
+
+it("uses responsive backing sizes and disconnects preview observers",()=>{
+ let width=600,height=350;const callbacks:(()=>void)[]=[],disconnect=vi.fn();vi.stubGlobal("ResizeObserver",class{constructor(cb:()=>void){callbacks.push(cb);}observe(){}disconnect=disconnect;});
+ vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(()=>({x:0,y:0,left:0,top:0,right:width,bottom:height,width,height,toJSON(){}}));
+ setup();const canvas=screen.getByLabelText("Footprint preview") as HTMLCanvasElement;expect(canvas.width).toBe(600);expect(canvas.height).toBe(350);width=820;height=430;callbacks.forEach(cb=>cb());expect(canvas.width).toBe(820);expect(canvas.height).toBe(430);
+ fireEvent.click(screen.getByRole("button",{name:"Back"}));expect(disconnect).toHaveBeenCalledTimes(2);
+});
+it("zooms and middle-drags each preview independently, and Fit resets its view",()=>{
+ vi.stubGlobal("PointerEvent",MouseEvent);
+ vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockReturnValue({x:0,y:0,left:0,top:0,right:400,bottom:260,width:400,height:260,toJSON(){}});
+ setup();const methods:Record<string,ReturnType<typeof vi.fn>>={};const ctx=new Proxy({} as CanvasRenderingContext2D,{get:(_,key)=>methods[String(key)]??=vi.fn(),set:()=>true});vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(ctx);
+ const canvas=screen.getByLabelText("Footprint preview");fireEvent.wheel(canvas,{deltaY:-500,clientX:200,clientY:130});const zoomed=methods.scale.mock.calls[0][0],originalX=methods.translate.mock.calls[0][0];methods.scale.mockClear();methods.translate.mockClear();
+ fireEvent.pointerDown(canvas,{button:1,clientX:200,clientY:130});fireEvent.pointerMove(canvas,{clientX:230,clientY:150});expect(methods.translate.mock.calls[0][0]).toBeCloseTo(originalX+30);fireEvent.pointerUp(canvas);methods.translate.mockClear();fireEvent.pointerMove(canvas,{clientX:300,clientY:180});expect(methods.translate).not.toHaveBeenCalled();
+ methods.scale.mockClear();fireEvent.click(screen.getByRole("button",{name:"Fit footprint preview"}));expect(methods.scale.mock.calls[0][0]).toBeLessThan(zoomed);expect(screen.queryByLabelText("Preview symbol unit")).toBeNull();expect(screen.queryByLabelText("Preview body style")).toBeNull();
+});
+
+it("renders saved components with Name, Footprint, Symbol, Actions and prevents deleting in-use components",async()=>{setup(undefined,null,(d)=>d.id==="d");fireEvent.click(screen.getByRole("button",{name:"Use saved component"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Load"})).toBeTruthy());const table=screen.getByRole("table");expect(within(table).getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Name","Footprint","Symbol","Actions"]);const row=screen.getByRole("button",{name:"Load"}).closest("tr")!;const cells=within(row).getAllByRole("cell");expect(cells[0].textContent).toBe("Connector");expect(cells[1].textContent).toBe("Connector footprint");expect(cells[2].textContent).toBe("Generic");expect(within(cells[3]).getAllByRole("button")).toHaveLength(3);const deleteBtn=screen.getByRole("button",{name:"Delete Connector"}) as HTMLButtonElement;expect(deleteBtn.disabled).toBe(true);expect(deleteBtn.getAttribute("title")).toBe("Cannot delete: component is in use on the board");expect(screen.queryByRole("separator")).toBeNull();});
+it("resizes creation panels by keyboard and captured pointer, restores cancellation and retains ratio",async()=>{
+ vi.stubGlobal("PointerEvent",class extends MouseEvent{pointerId:number;constructor(type:string,init:PointerEventInit){super(type,init);this.pointerId=init.pointerId??1;}});
+ setup(undefined,null);fireEvent.click(screen.getByRole("button",{name:"Create new component"}));const splitter=screen.getByRole("separator",{name:"Resize library list and previews"});const capture=vi.fn(),release=vi.fn();Object.assign(splitter,{setPointerCapture:capture,hasPointerCapture:()=>true,releasePointerCapture:release});
+ fireEvent.keyDown(splitter,{key:"Home"});const min=splitter.getAttribute("aria-valuenow");fireEvent.keyDown(splitter,{key:"ArrowDown"});expect(Number(splitter.getAttribute("aria-valuenow"))).toBeGreaterThan(Number(min));fireEvent.keyDown(splitter,{key:"Home"});
+ fireEvent.pointerDown(splitter,{button:0,pointerId:7,clientY:200});fireEvent.pointerMove(splitter,{pointerId:7,clientY:1000});expect(splitter.getAttribute("aria-valuenow")).toBe(splitter.getAttribute("aria-valuemax"));fireEvent.pointerCancel(splitter,{pointerId:7});expect(splitter.getAttribute("aria-valuenow")).toBe(min);expect(capture).toHaveBeenCalledWith(7);expect(release).toHaveBeenCalledWith(7);
+ fireEvent.keyDown(splitter,{key:"End"});const max=splitter.getAttribute("aria-valuenow");fireEvent.click(screen.getByRole("button",{name:"Configuration"}));fireEvent.click(screen.getByRole("button",{name:"Back to component"}));expect(splitter.getAttribute("aria-valuenow")).toBe(max);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Use footprint"})).toBeTruthy());fireEvent.click(screen.getByRole("button",{name:"Use footprint"}));await waitFor(()=>expect((screen.getByRole("button",{name:"Next"}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole("button",{name:"Next"}));expect(screen.getByRole("separator").getAttribute("aria-valuenow")).toBe(max);
+});
+
+it("closes directly without confirmation if no footprint has been selected", () => {
+ const onClose = vi.fn();
+ setup(undefined, null, undefined, onClose);
+ fireEvent.click(screen.getByRole("button", { name: "Close" }));
+ expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("shows discard confirmation when footprint is selected and keeps editing or discards", async () => {
+ const onClose = vi.fn();
+ setup(undefined, null, undefined, onClose);
+ await newFootprint();
+ const closeBtn = screen.getByRole("button", { name: "Close" });
+ fireEvent.click(closeBtn);
+ expect(onClose).not.toHaveBeenCalled();
+ expect(screen.getByRole("dialog", { name: "Discard component draft" })).toBeTruthy();
+ fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+ expect(screen.queryByRole("dialog", { name: "Discard component draft" })).toBeNull();
+ expect(onClose).not.toHaveBeenCalled();
+ fireEvent.keyDown(screen.getByRole("dialog", { name: "Component library" }), { key: "Escape" });
+ expect(screen.getByRole("dialog", { name: "Discard component draft" })).toBeTruthy();
+ fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
+ expect(onClose).toHaveBeenCalledTimes(1);
+});

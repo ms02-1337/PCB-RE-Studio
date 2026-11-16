@@ -88,6 +88,16 @@ it("resizes rects through zero and normalizes", () => {
   expect(resizeRect(rect, "s", { x: 20, y: 2 })).toEqual({ x: 10, y: 2, w: 20, h: 8 });
 });
 
+it("keeps the aspect ratio when resizing rects from corner handles", () => {
+  // 2:1 rect: the vertical delta (30/20 = 1.5x) dominates 50/40 = 1.25x, so
+  // the width follows the height and the ratio survives.
+  const wide = { x: 10, y: 10, w: 40, h: 20 };
+  expect(resizeRect(wide, "se", { x: 60, y: 40 })).toEqual({ x: 10, y: 10, w: 60, h: 30 });
+  // The opposite (nw) corner stays anchored; a square stays square.
+  const square = { x: 10, y: 10, w: 20, h: 20 };
+  expect(resizeRect(square, "nw", { x: 0, y: 0 })).toEqual({ x: 0, y: 0, w: 30, h: 30 });
+});
+
 it("resizes ellipse extents with the opposite extent fixed", () => {
   const ellipse = { cx: 10, cy: 10, rx: 5, ry: 5 };
   expect(resizeEllipse(ellipse, "e", { x: 20, y: 10 })).toEqual({
@@ -102,18 +112,20 @@ it("resizes ellipse extents with the opposite extent fixed", () => {
     rx: 5,
     ry: 5,
   });
-  // Corner handles resize both axes at once.
+  // Corner handles keep the ratio (a circle stays a circle): the vertical
+  // delta (20/10 = 2x) dominates the horizontal (15/10 = 1.5x).
   expect(resizeEllipse(ellipse, "se", { x: 20, y: 25 })).toEqual({
-    cx: 12.5,
+    cx: 15,
     cy: 15,
-    rx: 7.5,
+    rx: 10,
     ry: 10,
   });
-  // Dragging a corner past the opposite one inverts through zero, normalized.
+  // Dragging a corner past the opposite one inverts through zero, normalized,
+  // still on the diagonal ratio.
   expect(resizeEllipse(ellipse, "nw", { x: 20, y: 25 })).toEqual({
-    cx: 17.5,
+    cx: 20,
     cy: 20,
-    rx: 2.5,
+    rx: 5,
     ry: 5,
   });
 });

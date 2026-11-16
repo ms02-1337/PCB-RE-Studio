@@ -224,7 +224,7 @@ export function AutosaveSettingsModal(props: {
                     }}
                   />
                 </label>
-                <p class="autosave-helper">500–60000 ms</p>
+                <p class="autosave-helper">500-60000 ms</p>
                 <p class="autosave-helper muted">
                   With autosave off, changes stay in memory until you save
                   manually (Ctrl+S).

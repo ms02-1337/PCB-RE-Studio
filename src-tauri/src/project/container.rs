@@ -41,7 +41,7 @@ pub fn write_container(
     }
     let directory = target.parent().unwrap_or_else(|| Path::new("."));
     let temp = unique_temp_path(target, directory);
-    // Build, stat, and fsync the temp file, then rename it over the target —
+    // Build, stat, and fsync the temp file, then rename it over the target -
     // all inside one Result chain. No early `?` sits between temp creation
     // and the cleanup below, so every failure path removes the temp file.
     let outcome = write_container_file(&temp, project_json, blobs)
@@ -542,7 +542,7 @@ mod tests {
         let dir = temp_dir("rename-fail");
         // A directory as the target makes the final rename fail (Windows and
         // Unix both refuse file→dir renames), which exercises the unified
-        // cleanup path after the temp file was already written and synced —
+        // cleanup path after the temp file was already written and synced -
         // without having to force a real fsync failure.
         let target = dir.join("project.pcbre");
         fs::create_dir(&target).unwrap();

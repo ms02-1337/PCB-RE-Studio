@@ -287,6 +287,12 @@ pub struct CopperTrace {
     pub width: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_pad: Option<crate::kicad::types::WireAnchor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_pad: Option<crate::kicad::types::WireAnchor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -296,6 +302,8 @@ pub struct CopperZone {
     pub points: Vec<Point>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -307,6 +315,8 @@ pub struct CopperVia {
     pub drill: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 /// 2x2 linear part in canvas transform order: for ctx.transform(a, b, c, d, …)
 /// a point maps x' = a·x + c·y (+ e), y' = b·x + d·y (+ f).
@@ -318,6 +328,7 @@ pub struct VisualWarp {
     pub c: f64,
     pub d: f64,
 }
+
 /// 3x3 projective map source px → straightened source px with h33 = 1
 /// implicit: x' = (a·x + b·y + c) / (g·x + h·y + 1), y' = (d·x + e·y + f) /
 /// (g·x + h·y + 1). Set only by Deskew; absent = identity.
@@ -613,6 +624,7 @@ pub fn validate(doc: &ProjectDoc) -> ProjectResult<()> {
         let mut pcb_ids = HashSet::new();
         let mut image_ids = HashSet::new();
         let mut all_layers = HashSet::new();
+        let mut linked_markings = HashSet::new();
         if editor.pcbs.is_empty() {
             errors.push("visual editor needs at least one PCB".into());
         }
@@ -638,6 +650,15 @@ pub fn validate(doc: &ProjectDoc) -> ProjectResult<()> {
             }
             validate_copper(pcb, &mut errors);
             crate::kicad::validate_pcb(pcb, &mut errors);
+            for component in &pcb.components {
+                if let Some(marking) = &component.marking_id {
+                    if !doc.components.iter().any(|c| c.id == *marking)
+                        || !linked_markings.insert(marking)
+                    {
+                        errors.push("Missing or multiply linked Board mapping marking".into());
+                    }
+                }
+            }
             for image in &pcb.images {
                 if image.id.trim().is_empty()
                     || !image_ids.insert(&image.id)
@@ -1244,7 +1265,6 @@ mod tests {
         assert!(json.contains("\"warp\":{\"a\":1.0,\"b\":0.1,\"c\":-0.05,\"d\":0.9}"));
         // ryu prints the tiny off-diagonal terms in exponent notation.
         assert!(json.contains("\"perspective\":{\"a\":1.02,\"b\":0.001,\"c\":0.5,\"d\":-0.001,\"e\":1.01,\"f\":-0.25,\"g\":1e-6,\"h\":2e-6}"));
-
         assert!(json.contains("\"pxPerMm\":3.78"));
         let restored: ProjectDoc = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, doc);

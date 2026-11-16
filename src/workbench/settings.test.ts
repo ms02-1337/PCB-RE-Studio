@@ -36,7 +36,7 @@ it("falls back to the defaults on non-object payloads", () => {
   expect(loadAutosaveSettings()).toEqual(DEFAULT_AUTOSAVE_SETTINGS);
 });
 
-it("clamps out-of-bounds delays into 500–60000 ms", () => {
+it("clamps out-of-bounds delays into 500-60000 ms", () => {
   localStorage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify({ enabled: true, delayMs: 10 }));
   expect(loadAutosaveSettings()).toEqual({ enabled: true, delayMs: 500 });
   localStorage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify({ enabled: true, delayMs: 999999 }));

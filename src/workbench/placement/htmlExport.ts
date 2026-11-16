@@ -108,9 +108,9 @@ function componentDetails(doc: ProjectDoc, index: number, component: Component):
     ? isHttpUrl(component.datasheetUrl)
       ? `<a href="${esc(component.datasheetUrl)}" target="_blank" rel="noreferrer">${esc(component.datasheetUrl)}</a>`
       : `<span>${esc(component.datasheetUrl)}</span>`
-    : `<span class="muted">—</span>`;
+    : `<span class="muted">-</span>`;
   const field = (name: string, value: string | undefined) =>
-    `<tr><th>${name}</th><td>${value ? esc(value) : "<span class=\"muted\">—</span>"}</td></tr>`;
+    `<tr><th>${name}</th><td>${value ? esc(value) : "<span class=\"muted\">-</span>"}</td></tr>`;
   return `    <aside class="details" id="d${index}" data-board="${esc(component.boardId)}" hidden>
       <header><h3>${esc(component.refdes)}</h3>${component.locked ? '<span class="badge">Locked</span>' : ""}<button type="button" class="close" data-close>Close</button></header>
       <dl>
@@ -466,7 +466,7 @@ ${STYLE}
 </head>
 <body>
 <header class="page">
-  <h1 title="${esc(doc.name)}${doc.description ? ` — ${esc(doc.description)}` : ""}">${esc(doc.name)}</h1>
+  <h1 title="${esc(doc.name)}${doc.description ? ` - ${esc(doc.description)}` : ""}">${esc(doc.name)}</h1>
   <p class="meta" title="Created ${esc(doc.createdAt)} · Updated ${esc(doc.updatedAt)}">Created ${esc(doc.createdAt)} · Updated ${esc(doc.updatedAt)}</p>
 <div class="zoom-toolbar" role="toolbar" aria-label="Board zoom">
   <button type="button" data-scene-zoom="out" aria-label="Zoom out">−</button>

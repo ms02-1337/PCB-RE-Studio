@@ -1,4 +1,4 @@
-﻿import { padCopperContains,padContours,padHole } from "./padGeometry";
+﻿import { padCopperContains, padContours, padHole } from "./padGeometry";
 import type { Point } from "../placement/projectDoc";
 import type { VisualPcb } from "../visual/model";
 import { visualId } from "../visual/model";
@@ -30,9 +30,16 @@ export function localPoint(
     y: x * Math.sin(a) + y * Math.cos(a),
   };
 }
-export const padContains=padCopperContains;
+export const padContains = padCopperContains;
 export function terminalNumbers(d: ComponentDefinition) {
-  return [...new Set(d.footprint.pads.filter(p=>p.type!=="np_thru_hole"&&!(p.drill&&!p.plated)).map((p) => p.number).filter(Boolean))];
+  return [
+    ...new Set(
+      d.footprint.pads
+        .filter((p) => p.type !== "np_thru_hole" && !(p.drill && !p.plated))
+        .map((p) => p.number)
+        .filter(Boolean),
+    ),
+  ];
 }
 export function createInstance(
   pcb: VisualPcb,
@@ -134,10 +141,115 @@ export function drawFootprint(
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   drawGraphics(ctx, c.definition.footprint.graphics);
-  for(const p of c.definition.footprint.pads){ctx.beginPath();for(const pts of [...padContours(p),padHole(p)]){if(!pts.length)continue;ctx.moveTo(pts[0].x,pts[0].y);for(const q of pts.slice(1))ctx.lineTo(q.x,q.y);ctx.closePath();}ctx.globalAlpha=.7;ctx.fill('evenodd');ctx.globalAlpha=1;ctx.font='.7px sans-serif';ctx.fillText(p.number,p.x,p.y-p.height/2-.25);}  ctx.font = "1px sans-serif";
+  for (const p of c.definition.footprint.pads) {
+    ctx.save();
+    const hole = padHole(p);
+    if (hole.length) {
+      ctx.beginPath();
+      ctx.rect(-1e6, -1e6, 2e6, 2e6);
+      ctx.moveTo(hole[0].x, hole[0].y);
+      for (const q of hole.slice(1)) ctx.lineTo(q.x, q.y);
+      ctx.closePath();
+      ctx.clip("evenodd");
+    }
+    ctx.globalAlpha *= 0.7;
+    for (const pts of padContours(p)) {
+      if (!pts.length) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (const q of pts.slice(1)) ctx.lineTo(q.x, q.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.font = ".7px sans-serif";
+    ctx.fillText(p.number, p.x, p.y - p.height / 2 - 0.25);
+  }
+  ctx.font = "1px sans-serif";
   ctx.fillText(c.reference, 0, -2);
   ctx.restore();
 }
-
-
-
+export function replacementBoards(
+  pcbs: VisualPcb[],
+  ids: string[],
+  definition: ComponentDefinition,
+): { boards: VisualPcb[]; detached: string[] } {
+  const boards = pcbs
+      .filter((p) => p.components?.some((c) => ids.includes(c.id)))
+      .map((p) => structuredClone(p)),
+    detached: string[] = [];
+  for (const p of boards) {
+    for (const c of p.components ?? []) {
+      if (!ids.includes(c.id)) continue;
+      const allowed = new Set(terminalNumbers(definition));
+      for (const t of c.terminals)
+        if (!allowed.has(t.number) && t.netId)
+          detached.push(c.reference + "." + t.number);
+      Object.assign(c, mapReplacement(c, definition));
+    }
+    const terminals = new Map(
+      (p.components ?? []).map((c) => [
+        c.id,
+        new Set(c.terminals.map((t) => t.number)),
+      ]),
+    );
+    if (p.schematic) {
+      p.schematic.wires = p.schematic.wires.filter((w) =>
+        [w.start, w.end].every(
+          (a) => !a || terminals.get(a.componentId)?.has(a.terminal),
+        ),
+      );
+      p.schematic.labels = p.schematic.labels.filter(
+        (l) =>
+          !l.anchor ||
+          terminals.get(l.anchor.componentId)?.has(l.anchor.terminal),
+      );
+      p.schematic.units = p.schematic.units.filter((u) => {
+        const c = p.components?.find((c) => c.id === u.componentId);
+        return (
+          c &&
+          (!c.definition.symbol
+            ? u.unit === 1
+            : c.definition.symbol.units.some((s) => s.unit === u.unit))
+        );
+      });
+    }
+    for (const t of p.traces ?? [])
+      for (const key of ["startPad", "endPad"] as const) {
+        const a = t[key];
+        if (a && !terminals.get(a.componentId)?.has(a.terminal)) delete t[key];
+      }
+    ensureSchematic(p);
+  }
+  return { boards, detached };
+}
+/** Component body selection is deliberately broader than electrical copper hit testing. */
+export function componentContains(
+  c: ElectricalComponent,
+  p: Point,
+  px: number,
+  layer: string,
+): boolean {
+  const local = localPoint(c, p, px);
+  if (
+    c.definition.footprint.pads.some(
+      (pad) =>
+        (c.layerId === layer || !!(pad.plated && pad.drill)) &&
+        padContains(pad, local),
+    )
+  )
+    return true;
+  if (c.layerId !== layer) return false;
+  const points = c.definition.footprint.graphics.flatMap((g) => g.points);
+  for (const pad of c.definition.footprint.pads) {
+    const r = Math.hypot(pad.width, pad.height) / 2;
+    points.push({ x: pad.x - r, y: pad.y - r }, { x: pad.x + r, y: pad.y + r });
+  }
+  return (
+    points.length > 0 &&
+    local.x >= Math.min(...points.map((p) => p.x)) &&
+    local.x <= Math.max(...points.map((p) => p.x)) &&
+    local.y >= Math.min(...points.map((p) => p.y)) &&
+    local.y <= Math.max(...points.map((p) => p.y))
+  );
+}

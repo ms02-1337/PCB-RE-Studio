@@ -156,10 +156,12 @@ describe("select tool", () => {
     expect(onHandle.draft.kind).toBe("rectResize");
     expect(onHandle.commands).toEqual([{ type: "cursor", cursor: "nwse-resize" }]);
     const moved = pointerMove(onHandle.draft, at(200, 160), w);
-    expect(moved.preview).toEqual({ rect: { x: 100, y: 100, w: 100, h: 60 } });
+    // Corner drags keep the 2:1 ratio: dy (60/40 = 1.5x) beats dx (100/80 =
+    // 1.25x), so the width follows the height.
+    expect(moved.preview).toEqual({ rect: { x: 100, y: 100, w: 120, h: 60 } });
     const up = pointerUp(onHandle.draft, at(200, 160), w);
     expect(up.commands).toEqual([
-      { type: "updateShape", id: "r1", shape: { rect: { x: 100, y: 100, w: 100, h: 60 } } },
+      { type: "updateShape", id: "r1", shape: { rect: { x: 100, y: 100, w: 120, h: 60 } } },
     ]);
   });
 
@@ -225,12 +227,14 @@ describe("select tool", () => {
     ]);
   });
 
-  it("resizes ellipses from corner handles on both axes", () => {
+  it("resizes ellipses from corner handles keeping the ratio", () => {
     const w = world({ selectedId: "e1" });
     // SE bbox corner of (cx 300, cy 120, rx 40, ry 20) sits at (340, 140).
     const handle = pointerDown(none, at(340, 140), w);
     expect(handle.draft.kind).toBe("ellipseResize");
     if (handle.draft.kind === "ellipseResize") expect(handle.draft.handle).toBe("se");
+    // The drag deltas (100 vs 50) are 1.25x on both axes of the 2:1 ellipse,
+    // so the corner lands exactly on the pointer with the ratio intact.
     const up = pointerUp(handle.draft, at(360, 150), w);
     expect(up.commands).toEqual([
       { type: "updateShape", id: "e1", shape: { ellipse: { cx: 310, cy: 125, rx: 50, ry: 25 } } },

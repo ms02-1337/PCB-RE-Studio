@@ -4,6 +4,7 @@ export interface Terminal {
   number: string;
   netId?: string;
   nc?: boolean;
+  comment?: string;
 }
 export interface ElectricalComponent {
   id: string;
@@ -36,6 +37,7 @@ export interface WireAnchor {
   unit?: number;
 }
 export interface SchematicWire {
+  connections?: WireAnchor[];
   id: string;
   points: Point[];
   start?: WireAnchor;

@@ -1,7 +1,7 @@
 //! Standalone HTML export writer: replaces `@@ASSET:<hash>.<ext>@@` tokens
 //! with base64 `data:` URIs, sourcing blobs from staging first and then the
 //! open container (the same policy as `asset_read`). The token grammar is
-//! strict — any literal `@@ASSET:` text that does not parse exactly is an
+//! strict - any literal `@@ASSET:` text that does not parse exactly is an
 //! `invalid_data` error, never silently passed through.
 
 use crate::project::assets::read_from_container;

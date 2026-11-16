@@ -109,7 +109,7 @@ it("renders the canvas safely and shows project actions with a board", async () 
   expect(screen.getByRole("toolbar", { name: "Placement tools" })).toBeTruthy();
   expect(screen.getByRole("toolbar", { name: "Boards" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Add mapping tab" })).toBeTruthy();
-  expect(screen.getByText(/Front — 800 × 600 px/)).toBeTruthy();
+  expect(screen.getByText(/Front - 800 × 600 px/)).toBeTruthy();
 });
 
 it("shows the slimmed header actions and the new-component type picker", async () => {

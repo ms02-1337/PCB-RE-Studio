@@ -22,8 +22,13 @@ export function groupBom(members: BomMember[]): BomRow[] {
     const key = JSON.stringify([
       c.value,
       c.partName,
+      c.definition.footprint.name,
       c.definition.footprint.raw,
+      c.definition.footprint.pads,
+      c.definition.footprint.graphics,
+      c.definition.symbol?.name ?? "",
       c.definition.symbol?.raw ?? "",
+      c.definition.symbol?.units ?? [],
       Object.entries(c.definition.pinMap).sort(([a], [b]) =>
         a.localeCompare(b),
       ),
@@ -144,13 +149,11 @@ export function BomPanel(props: {
   const exportCsv = async () => {
     try {
       const path = await save({
-        defaultPath: "bom.zip",
-        filters: [{ name: "BOM CSV package", extensions: ["zip"] }],
+        defaultPath: "bom.csv",
+        filters: [{ name: "BOM CSV", extensions: ["csv"] }],
       });
       if (path)
-        await kicad.exportFiles(path, [
-          { name: "bom.csv", text: bomCsv(rows(), filter() === "all") },
-        ]);
+        await kicad.exportText(path, bomCsv(rows(), filter() === "all"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "BOM export failed.");
     }
@@ -182,7 +185,7 @@ export function BomPanel(props: {
           disabled={!isTauri() || !rows().length}
           onClick={() => void exportCsv()}
         >
-          Export CSV package…
+          Export CSV…
         </button>
       </div>
       <Show when={error()}>

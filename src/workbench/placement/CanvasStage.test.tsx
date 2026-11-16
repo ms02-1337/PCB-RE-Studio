@@ -222,7 +222,7 @@ it("repaints synchronously inside the ResizeObserver callback without waiting fo
   hostSize(800, 500);
   observer.callback([roEntry(800, 500)]);
   // The backing store moved and the full scene was repainted during the
-  // callback itself — rAF never fires in this test, so nothing else could
+  // callback itself - rAF never fires in this test, so nothing else could
   // have painted these ops.
   expect(canvas.width).toBe(800);
   expect(canvas.height).toBe(500);

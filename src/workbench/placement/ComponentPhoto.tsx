@@ -104,7 +104,7 @@ export function ComponentPhoto(props: {
   </figure>;
 }
 
-/** Full-size centered viewer for one photo: wheel zoom (clamped 0.1–16,
+/** Full-size centered viewer for one photo: wheel zoom (clamped 0.1-16,
  * anchored to the cursor), drag-pan while zoomed, Escape/backdrop/close
  * button, transform reset on every close. */
 function ImageViewer(props: { url: string; alt: string; onClose: () => void }) {
@@ -201,13 +201,6 @@ function ImageViewer(props: { url: string; alt: string; onClose: () => void }) {
       >
         <header class="type-dialog-header">
           <h2>Image viewer</h2>
-          <button
-            ref={closeButton}
-            class="image-viewer-close"
-            aria-label="Close image viewer"
-            title="Close"
-            onClick={close}
-          ><ActionIcon name="Close" /></button>
         </header>
         <div
           class="image-viewer-stage"
@@ -227,6 +220,17 @@ function ImageViewer(props: { url: string; alt: string; onClose: () => void }) {
           />
         </div>
         <p class="muted image-viewer-hint">Scroll to zoom · drag to pan</p>
+        <footer class="type-dialog-footer">
+          <button
+            ref={closeButton}
+            type="button"
+            class="type-close"
+            onClick={close}
+          >
+            <ActionIcon name="Close" />
+            Close
+          </button>
+        </footer>
       </section>
     </div>
   );
