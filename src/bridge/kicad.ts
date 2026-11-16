@@ -8,10 +8,11 @@ export interface KPin { number: string; name: string; x: number; y: number; rota
 export interface KSymbolUnit { unit: number; bodyStyle: number; pins: KPin[]; graphics: KGraphic[] }
 export interface KSymbol { id: string; name: string; source: string; raw: string; reference: string; units: KSymbolUnit[]; diagnostics: string[] }
 export interface ComponentDefinition { id: string; name: string; partName: string; value: string; referencePrefix: string; footprint: KFootprint; symbol?: KSymbol; pinMap: Record<string,string> }
-export interface LibrarySource { variables?: Record<string,string>; id: string; path: string; name: string; diagnostics: string[] }
+export interface LibrarySource { variables?: Record<string,string>; id: string; path: string; name: string; diagnostics: string[]; local?: boolean }
 export interface LibraryEntry { id: string; name: string; sourceId: string; kind: "footprint"|"symbol" }
 export interface LibraryPage { entries: LibraryEntry[]; total: number }
 export interface LibraryJob { id: string; status: "running"|"done"|"cancelled"|"failed"; scanned: number; total: number; error?: string }
+export interface ImportOutcome { file: string; library: string; entries: LibraryEntry[]; error?: string }
 async function call<T>(command:string,payload:Record<string,unknown>={}):Promise<T>{ if(!isTauri())throw new ProjectBridgeError("preview_unavailable","KiCad libraries are available in the desktop app."); try{return await invoke<T>(command,payload);}catch(e){const error=e as {code?:string;message?:string;detail?:string};throw new ProjectBridgeError(error.code??"unknown",error.message??"KiCad operation failed.",error.detail);} }
 export const kicad = {
  sources:()=>call<LibrarySource[]>("kicad_sources"),
@@ -26,6 +27,7 @@ export const kicad = {
  definitions:()=>call<ComponentDefinition[]>("kicad_definitions"),
  saveDefinition:(definition:ComponentDefinition)=>call<void>("kicad_save_definition",{definition}),
  deleteDefinition:(id:string)=>call<void>("kicad_delete_definition",{id}),
+ importFiles:(paths:string[])=>call<ImportOutcome[]>("kicad_import_files",{paths}),
  exportText:(path:string,text:string)=>call<void>("kicad_export_text",{path,text}),
  exportFiles:(path:string,files:{name:string;text:string}[])=>call<void>("kicad_export_files",{path,files}),
 };

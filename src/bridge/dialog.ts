@@ -10,6 +10,7 @@ const PROJECT_FILTERS = [{ name: "PCB RE Studio project", extensions: ["pcbre"] 
 const IMAGE_FILTERS = [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }];
 const DATASHEET_FILTERS = [{ name: "Datasheets", extensions: ["pdf"] }];
 const HTML_FILTERS = [{ name: "HTML document", extensions: ["html"] }];
+const KICAD_LIBRARY_FILTERS = [{ name: "KiCad library files", extensions: ["kicad_mod", "kicad_sym"] }];
 
 function guard(): void {
   if (!isTauri()) throw new Error(PREVIEW_MESSAGE);
@@ -20,6 +21,18 @@ async function pickOpen(filters: { name: string; extensions: string[] }[]): Prom
   try {
     const selection = await open({ multiple: false, directory: false, filters });
     return typeof selection === "string" ? selection : null;
+  } catch {
+    throw new Error("The file picker could not be opened.");
+  }
+}
+
+/** Multi-select picker for downloaded KiCad footprint/symbol files; covered by dialog:allow-open. */
+export async function pickKiCadLibraryFiles(): Promise<string[] | null> {
+  guard();
+  try {
+    const selection = await open({ multiple: true, directory: false, filters: KICAD_LIBRARY_FILTERS });
+    if (!selection) return null;
+    return Array.isArray(selection) ? selection : [selection];
   } catch {
     throw new Error("The file picker could not be opened.");
   }

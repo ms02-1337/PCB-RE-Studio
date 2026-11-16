@@ -63,6 +63,7 @@ pub async fn kicad_add_source(
             name,
             diagnostics: vec![],
             variables,
+            local: false,
         };
         registry(
             &app,
@@ -78,18 +79,7 @@ pub async fn kicad_add_source(
 }
 #[tauri::command]
 pub async fn kicad_remove_source(app: tauri::AppHandle, id: String) -> ProjectResult<()> {
-    blocking(move || {
-        registry(
-            &app,
-            |r| {
-                r.sources.retain(|s| s.id != id);
-                r.entries.retain(|e| e.source_id != id);
-                Ok(())
-            },
-            true,
-        )
-    })
-    .await
+    blocking(move || registry(&app, |r| remove_source(r, &id), true)).await
 }
 #[tauri::command]
 pub async fn kicad_rescan(app: tauri::AppHandle, source_id: String) -> ProjectResult<LibraryJob> {
@@ -155,49 +145,11 @@ pub async fn kicad_rescan(app: tauri::AppHandle, source_id: String) -> ProjectRe
                 if cancelled() {
                     return Ok(());
                 }
-                let source_path = path.to_string_lossy().into_owned();
                 match read(path) {
-                    Ok(raw) => {
-                        if path.extension().is_some_and(|e| e == "kicad_mod") {
-                            entries.push(LibraryEntry {
-                                id: parser::hash(&source_path),
-                                symbol_name: None,
-                                name: format!(
-                                    "{}:{}",
-                                    path.parent()
-                                        .and_then(Path::file_name)
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .trim_end_matches(".pretty"),
-                                    path.file_stem().unwrap_or_default().to_string_lossy()
-                                ),
-                                source_id: source.id.clone(),
-                                kind: "footprint".into(),
-                                path: source_path,
-                            });
-                        } else {
-                            match parser::symbol_names(&raw) {
-                                Ok(names) => {
-                                    for name in names {
-                                        entries.push(LibraryEntry {
-                                            id: parser::hash(&format!("{source_path}::{name}")),
-                                            name: format!(
-                                                "{}:{name}",
-                                                path.file_stem()
-                                                    .unwrap_or_default()
-                                                    .to_string_lossy()
-                                            ),
-                                            symbol_name: Some(name),
-                                            source_id: source.id.clone(),
-                                            kind: "symbol".into(),
-                                            path: source_path.clone(),
-                                        });
-                                    }
-                                }
-                                Err(e) => diagnostics.push(format!("{}: {e}", path.display())),
-                            }
-                        }
-                    }
+                    Ok(raw) => match index_file(&source.id, path, &raw) {
+                        Ok(mut file_entries) => entries.append(&mut file_entries),
+                        Err(e) => diagnostics.push(format!("{}: {e}", path.display())),
+                    },
                     Err(e) => diagnostics.push(e.to_string()),
                 }
                 if let Ok(mut j) = jobs.lock() {
@@ -377,6 +329,22 @@ pub async fn kicad_delete_definition(app: tauri::AppHandle, id: String) -> Proje
             },
             true,
         )
+    })
+    .await
+}
+/// Copies downloaded .kicad_mod/.kicad_sym files into the app-managed local
+/// library and indexes them; per-file failures are reported per outcome.
+#[tauri::command]
+pub async fn kicad_import_files(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> ProjectResult<Vec<import::ImportOutcome>> {
+    blocking(move || {
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| sexpr::error(&e.to_string()))?;
+        registry(&app, |r| import::import_files(&root, r, &paths), true)
     })
     .await
 }

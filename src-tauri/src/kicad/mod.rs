@@ -1,5 +1,6 @@
 pub mod codec;
 pub mod commands;
+pub mod import;
 pub mod parser;
 pub mod sexpr;
 pub mod types;
@@ -21,8 +22,12 @@ pub struct LibrarySource {
     pub diagnostics: Vec<String>,
     #[serde(default)]
     pub variables: HashMap<String, String>,
+    /// Marks the app-managed imported-files library, which cannot be
+    /// redirected or removed like user-registered sources.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,6 +107,66 @@ pub fn read(path: &Path) -> ProjectResult<String> {
         return Err(sexpr::error("Library file exceeds 64 MiB."));
     }
     Ok(fs::read_to_string(path)?)
+}
+/// Stable identity of the app-managed imported-files library.
+pub const LOCAL_SOURCE_ID: &str = "pcbre-local-imports";
+pub const LOCAL_SOURCE_NAME: &str = "Imported files";
+pub const LOCAL_LIBRARY_DIR: &str = "kicad-local";
+pub const LOCAL_FOOTPRINT_DIR: &str = "Imported.pretty";
+pub const MAX_SYMBOLS_PER_FILE: usize = 10_000;
+/// Builds the library entries for one discovered or imported library file.
+/// Entry identity depends only on the canonical file path (plus symbol name),
+/// so imported entries and a later rescan of the same source never duplicate.
+pub fn index_file(source_id: &str, path: &Path, raw: &str) -> ProjectResult<Vec<LibraryEntry>> {
+    let source_path = path.to_string_lossy().into_owned();
+    if path.extension().is_some_and(|e| e == "kicad_mod") {
+        return Ok(vec![LibraryEntry {
+            id: parser::hash(&source_path),
+            symbol_name: None,
+            name: format!(
+                "{}:{}",
+                path.parent()
+                    .and_then(Path::file_name)
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .trim_end_matches(".pretty"),
+                path.file_stem().unwrap_or_default().to_string_lossy()
+            ),
+            source_id: source_id.into(),
+            kind: "footprint".into(),
+            path: source_path,
+        }]);
+    }
+    let names = parser::symbol_names(raw)?;
+    if names.len() > MAX_SYMBOLS_PER_FILE {
+        return Err(sexpr::error("Symbol file exceeds the 10000-symbol limit."));
+    }
+    Ok(names
+        .into_iter()
+        .map(|name| LibraryEntry {
+            id: parser::hash(&format!("{source_path}::{name}")),
+            name: format!(
+                "{}:{name}",
+                path.file_stem().unwrap_or_default().to_string_lossy()
+            ),
+            symbol_name: Some(name),
+            source_id: source_id.into(),
+            kind: "symbol".into(),
+            path: source_path.clone(),
+        })
+        .collect())
+}
+/// Removes a user-registered source and its entries; the app-managed local
+/// imported-files library is protected and rejected here.
+pub fn remove_source(registry: &mut Registry, id: &str) -> ProjectResult<()> {
+    if registry.sources.iter().any(|s| s.id == id && s.local) {
+        return Err(sexpr::error(
+            "The imported-files library is managed by the app and cannot be removed.",
+        ));
+    }
+    registry.sources.retain(|s| s.id != id);
+    registry.entries.retain(|e| e.source_id != id);
+    Ok(())
 }
 pub fn discover(
     source: &LibrarySource,

@@ -11,6 +11,7 @@ import { librarySplit } from "./librarySplit";
 import { fitLibraryPreview, libraryPreviewBounds, previewPoint } from "./libraryPreview";
 import { LibrarySettings } from "./LibrarySettings";
 import { ActionIcon } from "../ActionIcon";
+import { pickKiCadLibraryFiles } from "../../bridge/dialog";
 import {
   kicad,
   type ComponentDefinition,
@@ -48,6 +49,8 @@ export function ComponentManager(props: {
     [error, setError] = createSignal(""),
 
     [busy, setBusy] = createSignal(false);
+  const [importing, setImporting] = createSignal(false);
+  const [importStatus, setImportStatus] = createSignal("");
   let dialog: HTMLElement | undefined;
   let alive = true,
     request = 0;
@@ -134,6 +137,26 @@ export function ComponentManager(props: {
     }
     setBusy(false);
   };
+  const importLibraryFiles = async () => {
+    if (importing()) return;
+    setImportStatus("");
+    const paths = await guard(() => pickKiCadLibraryFiles());
+    if (!paths || !paths.length || !alive) return;
+    setImporting(true);
+    const outcomes = await guard(() => kicad.importFiles(paths));
+    if (outcomes && alive) {
+      const failures = outcomes.filter(o => o.error);
+      const count = outcomes.reduce((total, o) => total + o.entries.length, 0);
+      if (failures.length)
+        setError(failures.map(f => `${f.file}: ${f.error}`).join(" "));
+      if (count) {
+        setImportStatus(`Imported ${count} ${count === 1 ? "entry" : "entries"} into the local library.`);
+        setRevision(n => n + 1);
+        void refresh();
+      }
+    }
+    if (alive) setImporting(false);
+  };
   const save = async (place = false) => {
     const d = definition();
     if (!d || busy() || step() !== "review" || (place && props.placementUnavailableReason)) return;
@@ -160,7 +183,7 @@ export function ComponentManager(props: {
     if (alive) setBusy(false);
   };
   const navigate = (next: Step) => {
-    setStep(next); setError(""); setSuccess(""); setQuery(""); setOffset(0);
+    setStep(next); setError(""); setSuccess(""); setQuery(""); setOffset(0); setImportStatus("");
     if (next === "saved" || next === "footprint" || next === "symbol") setKind(next);
   };
   const startNew = () => { setDefinition(undefined); setSavedFlow(false); navigate("footprint"); };
@@ -346,8 +369,10 @@ export function ComponentManager(props: {
                 <h3>{step() === "saved" ? "Saved components" : step() === "symbol" ? "Select a symbol (optional)" : "Select a footprint"}</h3>
                 <Show when={step() === "symbol"}><button disabled={!definition() || busy()} onClick={genericSymbol}>Use generic symbol</button></Show>
                 <label class="component-search-label">Search <input aria-label="Search library" value={query()} onInput={e => { setQuery(e.currentTarget.value); setOffset(0); }} /></label>
+                <Show when={kind() !== "saved"}><button class="component-import-btn" disabled={busy() || loading() || importing()} title="Copy downloaded .kicad_mod or .kicad_sym files into the app-managed local library" onClick={() => void importLibraryFiles()}>Import…</button></Show>
 
               </div>
+              <Show when={importStatus()}><p role="status" aria-label="Import result" class="component-import-status">{importStatus()}</p></Show>
               <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results" aria-busy={loading() && kind() !== "saved"}><Show when={!loading() || kind() === "saved"} fallback={<div class="component-library-loading" role="status" aria-live="polite"><span class="component-library-spinner" aria-hidden="true" /><strong>Loading KiCad library</strong><span>Fetching {kind() === "symbol" ? "symbols" : "footprints"}...</span></div>}><table><thead><tr><th>Name</th><Show when={kind() === "saved"} fallback={<th>Source</th>}><th>Footprint</th><th>Symbol</th></Show><th>Actions</th></tr></thead><tbody>
                 <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td>{entry.name}</td><td>{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td><div class="component-row-actions"><button disabled={busy() || loading() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></div></td></tr>}</For>}>
                   <For each={saved().filter(d => d.name.toLowerCase().includes(query().toLowerCase())).sort((a,b) => a.name.localeCompare(b.name))}>{d => {

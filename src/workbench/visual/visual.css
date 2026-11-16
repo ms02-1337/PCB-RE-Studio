@@ -589,6 +589,8 @@
 .component-manager tbody tr:nth-child(even),.library-source-table tbody tr:nth-child(even){background:var(--surface)}
 .component-manager tr.selected{background:color-mix(in srgb,var(--accent,#ffcd11) 18%,transparent)}
 .component-pagination{justify-content:flex-end;margin-top:8px}
+.component-import-status{margin:2px 0 0;font-size:12px;color:var(--accent,#ffcd11)}
+.library-local-note{font-size:12px;color:var(--text);opacity:.8}
 .component-manager .component-previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .component-previews>div{min-width:0;border:1px solid var(--border);padding:10px}
 .component-manager .component-previews canvas{display:block;width:100%;max-width:none;aspect-ratio:400/220;background:var(--bg)}

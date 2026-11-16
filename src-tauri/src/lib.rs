@@ -63,6 +63,7 @@ pub fn run() {
             kicad::commands::kicad_definitions,
             kicad::commands::kicad_save_definition,
             kicad::commands::kicad_delete_definition,
+            kicad::commands::kicad_import_files,
             kicad::commands::kicad_export_text,
             kicad::commands::kicad_export_files
         ])
