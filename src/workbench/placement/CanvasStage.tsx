@@ -107,11 +107,13 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
   const draw = () => {
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
-    const viewport = size();
     const dpr = window.devicePixelRatio || 1;
     const currentView = view();
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    context.clearRect(0, 0, viewport.width, viewport.height);
+    // Clear the whole backing store, not the CSS box: once sizes come from
+    // devicePixelContentBoxSize the bitmap can exceed css × dpr by a device
+    // pixel, and a CSS-sized clear would leave a stale edge.
+    context.clearRect(0, 0, canvas.width, canvas.height);
     for (const image of store.sceneBoards()) {
     const active = displayedBoard(image);
     const isActive = active.id === board()?.id;
@@ -219,16 +221,42 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
     if (dirty && !raf) raf = requestAnimationFrame(frame);
   };
 
-  const resize = () => {
+  const resize = (entries?: ResizeObserverEntry[]) => {
     if (!wrap || !canvas) return;
     const rect = wrap.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const next = { width: rect.width, height: rect.height };
-    setSize(next);
-    store.setViewport(next);
-    canvas.width = Math.max(1, Math.round(rect.width * dpr));
-    canvas.height = Math.max(1, Math.round(rect.height * dpr));
-    markDirty();
+    // Prefer the observer's device-pixel box (already snapped, no fractional
+    // drift); the direct on-mount call has no entries and derives it instead.
+    // The array can be empty per spec, hence the length guard.
+    const box = entries?.[0]?.devicePixelContentBoxSize;
+    const w = box?.length ? box[0].inlineSize : Math.max(1, Math.round(rect.width * dpr));
+    const h = box?.length ? box[0].blockSize : Math.max(1, Math.round(rect.height * dpr));
+    const previous = size();
+    // Assigning canvas.width/height clears the bitmap even when the value is
+    // unchanged, so a fully unchanged tick must skip every write and the
+    // repaint entirely (no-op resizes must not blank the canvas).
+    if (previous.width === next.width && previous.height === next.height && canvas.width === w && canvas.height === h) return;
+    if (previous.width !== next.width || previous.height !== next.height) {
+      setSize(next);
+      store.setViewport(next);
+    }
+    // A fractional CSS change can round to the same device pixels; the
+    // bitmap is only cleared (and only needs the synchronous repaint below)
+    // when the backing store actually changes.
+    if (canvas.width === w && canvas.height === h) return;
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    // ResizeObserver fires after layout but BEFORE paint; leaving the
+    // repaint to the frame loop would composite the just-cleared bitmap as a
+    // blank frame on every resize tick (the sidebar-resize flicker). Paint
+    // synchronously here — after the signal writes above (setSize runs the
+    // fit effect, which may arm a frame via markDirty) — and drop any frame
+    // this repaint supersedes.
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    dirty = false;
+    draw();
   };
 
   let fittedScene = "";
@@ -245,10 +273,13 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
 
   onMount(() => {
     // jsdom has no ResizeObserver; resize once and stay render-safe there.
+    // The observer hands its entries to resize() so the backing store can
+    // snap to devicePixelContentBoxSize instead of css × dpr.
     const observer =
       typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     observer?.observe(wrap!);
-    // resize() marks dirty, which arms the self-stopping frame loop.
+    // The direct call has no entries (fallback sizing) and paints once,
+    // synchronously; later invalidations go through markDirty's frame loop.
     resize();
     onCleanup(() => {
       observer?.disconnect();

@@ -26,8 +26,12 @@ export function PlacementPanel(props: {
   const [detailsOpen, setDetailsOpen] = createSignal(true);
   const [detailsWidth, setDetailsWidth] = createSignal(300);
   let split!: HTMLDivElement;
-  let resizing: { x: number; width: number } | null = null;
-  const changeWidth = (width: number) => setDetailsWidth(Math.max(220, Math.min(width, Math.max(220, (split?.clientWidth || 800) - 220), 600)));
+  let resizing: { x: number; width: number; splitWidth: number } | null = null;
+  // splitWidth is captured once per gesture (pointerdown): reading
+  // split.clientWidth here keeps the per-pointermove clamp free of forced
+  // layout reads, which used to stutter the canvas beside the resizer.
+  // The keyboard path keeps the default (one read per keypress is fine).
+  const changeWidth = (width: number, splitWidth = split?.clientWidth || 800) => setDetailsWidth(Math.max(220, Math.min(width, Math.max(220, splitWidth - 220), 600)));
   return (
     <div class="placement-panel">
       <div class="pl-actions" role="toolbar" aria-label="Project actions">
@@ -72,8 +76,8 @@ export function PlacementPanel(props: {
           <div class="pl-inspector" classList={{ "is-collapsed": !detailsOpen() }} style={{ width: detailsOpen() ? `${detailsWidth()}px` : "34px" }}>
             <Show when={detailsOpen()}>
               <div class="pl-inspector-resizer" role="separator" aria-label="Resize selection details" aria-orientation="vertical" tabIndex={0} aria-valuemin={220} aria-valuemax={600} aria-valuenow={detailsWidth()}
-                onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); resizing = { x: event.clientX, width: detailsWidth() }; event.currentTarget.setPointerCapture(event.pointerId); }}
-                onPointerMove={(event) => { if (resizing) changeWidth(resizing.width + resizing.x - event.clientX); }}
+                onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); resizing = { x: event.clientX, width: detailsWidth(), splitWidth: split.clientWidth }; event.currentTarget.setPointerCapture(event.pointerId); }}
+                onPointerMove={(event) => { if (resizing) changeWidth(resizing.width + resizing.x - event.clientX, resizing.splitWidth); }}
                 onPointerUp={(event) => { resizing = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
                 onPointerCancel={() => { resizing = null; }} onLostPointerCapture={() => { resizing = null; }}
                 onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); changeWidth(detailsWidth() + (event.key === "ArrowLeft" ? 20 : -20)); } }} />

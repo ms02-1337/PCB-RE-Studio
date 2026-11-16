@@ -117,7 +117,10 @@ export function VisualCanvas(props: {
     frame = 0;
     const ctx = canvas?.getContext("2d"); if (!ctx) return;
     const ratio = window.devicePixelRatio || 1;
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, width, height);
+    // Clear the whole backing store, not the CSS box: once sizes come from
+    // devicePixelContentBoxSize the bitmap can exceed css × dpr by a device
+    // pixel, and a CSS-sized clear would leave a stale edge.
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     // View flips mirror the whole world pass about the canvas center; the
     // overlay pass below draws in screen space through worldToScreen instead.
@@ -205,12 +208,25 @@ export function VisualCanvas(props: {
   createEffect(() => { void props.flipX; void props.flipY; controller.update(view()); redraw(); });
   createEffect(() => { if (canvas) canvas.style.cursor = props.tool ? "crosshair" : ""; });
   onMount(() => {
-    const resize = () => {
-      width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight);
+    const resize = (entries?: ResizeObserverEntry[]) => {
+      // Fractional CSS size: clientWidth would floor away subpixels that the
+      // view/fit math still wants to see.
+      const rect = host.getBoundingClientRect();
+      const nextWidth = Math.max(1, rect.width), nextHeight = Math.max(1, rect.height);
       const ratio = window.devicePixelRatio || 1;
-      const w = Math.round(width * ratio), h = Math.round(height * ratio);
+      // Prefer the observer’s device-pixel box (already snapped, no fractional
+      // drift); the direct on-mount call has no entries and derives it instead.
+      // The array can be empty per spec, hence the length guard.
+      const box = entries?.[0]?.devicePixelContentBoxSize;
+      const w = box?.length ? box[0].inlineSize : Math.round(nextWidth * ratio);
+      const h = box?.length ? box[0].blockSize : Math.round(nextHeight * ratio);
       // Assigning canvas.width/height clears the bitmap even when the value is
-      // unchanged, so only reassign on an actual size change.
+      // unchanged, so an unchanged tick skips the assignment AND the draw
+      // below (no-op resizes must not blank the canvas).
+      if (width === nextWidth && height === nextHeight && canvas.width === w && canvas.height === h) return;
+      width = nextWidth; height = nextHeight;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
       if (canvas.width !== w) canvas.width = w;
       if (canvas.height !== h) canvas.height = h;
       // ResizeObserver fires after layout but BEFORE paint; deferring this

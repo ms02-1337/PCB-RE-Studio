@@ -140,3 +140,125 @@ it("draws and selects scene markings in an empty mapping tab", async () => {
   pointer("pointerdown", 80, 80);
   expect(store.selectedId()).toBe(selected?.id);
 });
+
+// ---------------------------------------------------------------------------
+// Resize anti-flicker: the ResizeObserver callback must repaint synchronously
+// (before the browser paints), and a no-op tick must neither clear the bitmap
+// nor touch any signal.
+// ---------------------------------------------------------------------------
+
+/** Minimal ResizeObserver double: keeps the callback and the observed targets
+ * so a test can fire resize ticks manually with synthetic entries. */
+class ResizeObserverStub {
+  readonly observed: Element[] = [];
+  constructor(readonly callback: (entries: ResizeObserverEntry[]) => void) {
+    observerStubs.push(this);
+  }
+  observe(target: Element): void { this.observed.push(target); }
+  unobserve(): void {}
+  disconnect(): void {}
+}
+const observerStubs: ResizeObserverStub[] = [];
+
+/** Records every 2D-context call and property write: jsdom has no canvas
+ * rasterizer, so "was it painted?" becomes "were ops recorded?". */
+function recordingContext(): { ctx: CanvasRenderingContext2D; ops: { op: string; args: unknown[] }[] } {
+  const ops: { op: string; args: unknown[] }[] = [];
+  const ctx = new Proxy({} as Record<string, unknown>, {
+    get: (_target, property) => {
+      if (typeof property !== "string") return undefined;
+      return (...args: unknown[]) => { ops.push({ op: property, args }); };
+    },
+    set: (target, property, value) => {
+      target[property as string] = value;
+      ops.push({ op: property as string, args: [value] });
+      return true;
+    },
+  });
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, ops };
+}
+
+/** A spec-shaped observer entry; device defaults to an EMPTY device-pixel box
+ * (allowed per spec) so the css × dpr fallback path is exercised. */
+const roEntry = (
+  width: number,
+  height: number,
+  device: ReadonlyArray<{ inlineSize: number; blockSize: number }> = [],
+): ResizeObserverEntry => ({
+  target: document.createElement("div"),
+  contentRect: new DOMRect(0, 0, width, height),
+  borderBoxSize: [],
+  contentBoxSize: [],
+  devicePixelContentBoxSize: device,
+});
+
+const domRect = (width: number, height: number) =>
+  ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) });
+
+/** The shared setup() stays untouched; this variant layers a controllable
+ * ResizeObserver, a never-firing rAF, and a recording context on top of it. */
+async function setupResize() {
+  observerStubs.length = 0;
+  vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+  const base = await setup();
+  const { ctx, ops } = recordingContext();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx);
+  const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  rect.mockReturnValue(domRect(600, 400));
+  return {
+    ...base,
+    canvas: base.canvas as HTMLCanvasElement,
+    observer: observerStubs[observerStubs.length - 1]!,
+    ops,
+    hostSize: (width: number, height: number) => rect.mockReturnValue(domRect(width, height)),
+  };
+}
+
+it("repaints synchronously inside the ResizeObserver callback without waiting for a frame", async () => {
+  const { canvas, observer, ops, hostSize } = await setupResize();
+  expect(canvas.width).toBe(600);
+  expect(canvas.height).toBe(400);
+  ops.length = 0;
+  hostSize(800, 500);
+  observer.callback([roEntry(800, 500)]);
+  // The backing store moved and the full scene was repainted during the
+  // callback itself — rAF never fires in this test, so nothing else could
+  // have painted these ops.
+  expect(canvas.width).toBe(800);
+  expect(canvas.height).toBe(500);
+  const cleared = ops.findIndex((op) => op.op === "clearRect");
+  expect(cleared).toBeGreaterThanOrEqual(0);
+  expect(ops[cleared].args).toEqual([0, 0, 800, 500]);
+  expect(ops.length).toBeGreaterThan(cleared + 1);
+});
+
+it("skips every write, signal, and repaint on an unchanged resize tick", async () => {
+  const { store, canvas, observer, ops } = await setupResize();
+  const setViewport = vi.spyOn(store, "setViewport");
+  // Instance-level setter spy: reassigning canvas.width (even to the same
+  // value) clears the bitmap, so an unchanged tick must not write at all.
+  let widthWrites = 0;
+  let backingWidth = canvas.width;
+  Object.defineProperty(canvas, "width", {
+    configurable: true,
+    get: () => backingWidth,
+    set: (value: number) => { widthWrites++; backingWidth = value; },
+  });
+  ops.length = 0;
+  observer.callback([roEntry(600, 400)]);
+  expect(widthWrites).toBe(0);
+  expect(canvas.width).toBe(600);
+  expect(ops).toEqual([]);
+  expect(setViewport).not.toHaveBeenCalled();
+});
+
+it("prefers the device-pixel content box and falls back to css × dpr on an empty one", async () => {
+  const { canvas, observer } = await setupResize();
+  observer.callback([roEntry(600, 400, [{ inlineSize: 1200, blockSize: 800 }])]);
+  expect(canvas.width).toBe(1200);
+  expect(canvas.height).toBe(800);
+  // An empty device box (per-spec) falls back to the CSS size × dpr.
+  observer.callback([roEntry(600, 400)]);
+  expect(canvas.width).toBe(600);
+  expect(canvas.height).toBe(400);
+});
