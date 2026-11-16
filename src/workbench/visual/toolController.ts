@@ -576,7 +576,9 @@ export function createVisualToolController(): VisualToolController {
 
   const controller: VisualToolController = {
     begin: (tool, image, pxPerMm) => {
-      if (image.locked) {
+      // Measure never mutates the image, so a locked photograph must not
+      // block it; the transform tools keep their lock rejection.
+      if (image.locked && tool !== "measure") {
         clear();
         return [{ kind: "toast", message: "Image is locked" }];
       }

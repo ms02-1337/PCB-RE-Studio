@@ -375,7 +375,7 @@ export function ComponentManager(props: {
                 Previous
               </button>
               <span>
-                {offset() + 1}�{Math.min(offset() + 50, total())} / {total()}
+                {offset() + 1}–{Math.min(offset() + 50, total())} / {total()}
               </span>
               <button
                 disabled={offset() + 50 >= total()}
@@ -462,7 +462,7 @@ export function ComponentManager(props: {
                                 >
                                   {(p) => (
                                     <option value={p.number}>
-                                      {p.number} � {p.name}
+                                      {p.number} – {p.name}
                                     </option>
                                   )}
                                 </For>

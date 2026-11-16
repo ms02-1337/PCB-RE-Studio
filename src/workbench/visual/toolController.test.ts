@@ -40,12 +40,15 @@ const warpOf = (intent: ToolIntent | undefined): Warp2 | undefined =>
   intent?.kind === "commitResize" ? intent.warp : undefined;
 
 describe("controller lifecycle", () => {
-  it("rejects locked images with a toast and stays idle", () => {
+  it("rejects locked images for transforms but allows measure", () => {
     const c = createVisualToolController();
-    expect(c.begin("measure", mkImage({ locked: true }), undefined)).toEqual([{ kind: "toast", message: "Image is locked" }]);
+    expect(c.begin("rotate", mkImage({ locked: true }), undefined)).toEqual([{ kind: "toast", message: "Image is locked" }]);
     expect(c.tool()).toBeNull();
     expect(c.targetId()).toBeNull();
     expect(c.overlay()).toEqual([]);
+    // Measure never mutates the image, so a lock must not block it.
+    expect(c.begin("measure", mkImage({ locked: true }), undefined)).toEqual([]);
+    expect(c.tool()).toBe("measure");
   });
 
   it("captures the target at begin, replaces state on re-begin, and exits on Esc", () => {

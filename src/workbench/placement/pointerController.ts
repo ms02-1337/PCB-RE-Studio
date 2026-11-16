@@ -49,8 +49,8 @@ export interface World {
 
 export type Draft =
   | { kind: "none" }
-  | { kind: "rect"; anchor: Point; current: Point; shift: boolean }
-  | { kind: "ellipse"; anchor: Point; current: Point; shift: boolean }
+  | { kind: "rect"; anchor: Point; current: Point; shift: boolean; fixed?: boolean }
+  | { kind: "ellipse"; anchor: Point; current: Point; shift: boolean; fixed?: boolean }
   | { kind: "polygon"; points: Point[]; cursor: Point }
   | { kind: "move"; id: string; original: Shape; startBoard: Point; currentBoard: Point }
   | { kind: "rectResize"; id: string; handle: RectHandle; original: Shape }
@@ -173,12 +173,18 @@ export function pointerDown(draft: Draft, input: PointerInput, world: World): St
   }
   if (input.button !== 0) return { draft, commands };
 
-  if (world.tool === "rect" || world.tool === "ellipse") {
+  if (world.tool === "rect" || world.tool === "ellipse" || world.tool === "square" || world.tool === "circle") {
+    // Square/Circle are the constrained twins of rect/ellipse: the 1:1 lock
+    // stays on for the whole drag (Shift gives the same result transiently).
+    const constrained = world.tool === "square" || world.tool === "circle";
     return {
-      draft:
-        world.tool === "rect"
-          ? { kind: "rect", anchor: input.boardPoint, current: input.boardPoint, shift: input.shift }
-          : { kind: "ellipse", anchor: input.boardPoint, current: input.boardPoint, shift: input.shift },
+      draft: {
+        kind: world.tool === "rect" || world.tool === "square" ? "rect" : "ellipse",
+        anchor: input.boardPoint,
+        current: input.boardPoint,
+        shift: constrained || input.shift,
+        ...(constrained ? { fixed: true } : {}),
+      } as Extract<Draft, { kind: "rect" | "ellipse" }>,
       commands,
     };
   }
@@ -261,7 +267,9 @@ export function pointerMove(draft: Draft, input: PointerInput, _world: World): S
   switch (draft.kind) {
     case "rect":
     case "ellipse": {
-      const next = { ...draft, current: input.boardPoint, shift: input.shift };
+      // `fixed` (Square/Circle tools) keeps the 1:1 constraint locked for the
+      // whole drag regardless of the live Shift state.
+      const next = { ...draft, current: input.boardPoint, shift: draft.fixed ? true : input.shift };
       return { draft: next, commands, preview: draftShape(next, input) };
     }
     case "polygon":

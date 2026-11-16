@@ -27,7 +27,7 @@ export const AUTOSAVE_DELAY_MS = 2000;
 export const MIN_AUTOSAVE_DELAY_MS = 500;
 export const MAX_AUTOSAVE_DELAY_MS = 60000;
 
-export type Tool = "select" | "rect" | "ellipse" | "polygon" | "pan" | "crop";
+export type Tool = "select" | "rect" | "ellipse" | "square" | "circle" | "polygon" | "pan" | "crop";
 export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 export interface PlacementBridge {

@@ -831,7 +831,7 @@ footer button {
 .dialog-header h2 { margin: 0; text-transform: none; font-size: 13px; }
 .dialog-content { padding: 20px 16px; overflow: auto; }
 .dialog-content p { margin: 0; }
-.dialog-actions { display: flex; justify-content: flex-end; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--border); }
+.dialog-actions { display: flex; justify-content: flex-end; padding: 14px 16px; background: var(--surface); border-top: 1px solid var(--border); }
 .settings-actions .settings-apply {
   background: var(--accent);
   color: #181818;

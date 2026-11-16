@@ -65,8 +65,12 @@ it("shows the tool toolbar with gated enablement and independent PCB tabs", () =
   render(() => <VisualPanel store={store} active />);
   const tools = screen.getByRole("toolbar", { name: "Visual editor tools" });
   const buttons = within(tools).getAllByRole("button");
-  expect(buttons.map((button) => button.textContent)).toEqual(["Select", "Place trace", "Place zone", "Place via", "Place component", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
-  expect(buttons.slice(5, 12).every((button) => button.hasAttribute("disabled"))).toBe(true);
+  // The copper placement tools are icon-only (aria-labels carry their names).
+  expect(buttons.map((button) => button.textContent)).toEqual(["", "", "", "", "", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
+  expect(within(tools).getAllByRole("button").slice(0, 5).map((button) => button.getAttribute("aria-label"))).toEqual(["Select", "Place trace", "Place zone", "Place via", "Place component"]);
+  // Measure is always enabled; the photograph tools stay gated.
+  expect(buttons[5].hasAttribute("disabled")).toBe(false);
+  expect(buttons.slice(6, 12).every((button) => button.hasAttribute("disabled"))).toBe(true);
   // Add image moved out of the toolbar into the Images heading; browser
   // preview (isTauri false) keeps it disabled.
   const addImage = screen.getByRole("button", { name: "Add image" });
@@ -88,7 +92,9 @@ it("enables tools only for a selection, gates transforms on lock and toggles ari
   store.visual.addImage(store.visual.activePcb()!.id, asset, "Front", 100, 80);
   render(() => <VisualPanel store={store} active />);
   const toolButtons = ["Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize"].map((name) => screen.getByRole("button", { name }));
-  for (const button of toolButtons) expect(button.hasAttribute("disabled")).toBe(true);
+  // Measure is always available, even with nothing selected.
+  expect(toolButtons[0].hasAttribute("disabled")).toBe(false);
+  for (const button of toolButtons.slice(1)) expect(button.hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Front" }));
   for (const button of toolButtons) expect(button.hasAttribute("disabled")).toBe(false);
   const measure = screen.getByRole("button", { name: "Measure" });

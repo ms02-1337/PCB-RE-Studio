@@ -81,6 +81,24 @@ describe("draw tools", () => {
     expect(preview).toEqual({ ellipse: { cx: 15, cy: 15, rx: 15, ry: 15 } });
   });
 
+  it("square and circle tools stay constrained without Shift", () => {
+    // Square: equal sides even with a very uneven drag and Shift released.
+    let start = pointerDown(none, at(0, 0), world({ tool: "square" }));
+    expect(start.draft).toMatchObject({ kind: "rect", shift: true, fixed: true });
+    let moved = pointerMove(start.draft, at(40, 10), world({ tool: "square" }));
+    expect(moved.preview).toEqual({ rect: { x: 0, y: 0, w: 40, h: 40 } });
+    let up = pointerUp(start.draft, at(40, 10), world({ tool: "square" }));
+    expect(up.commands[0]).toEqual({ type: "add", shape: { rect: { x: 0, y: 0, w: 40, h: 40 } } });
+
+    // Circle: equal radii; the constraint survives Shift-less moves.
+    start = pointerDown(none, at(0, 0), world({ tool: "circle" }));
+    expect(start.draft).toMatchObject({ kind: "ellipse", shift: true, fixed: true });
+    moved = pointerMove(start.draft, at(10, 24), world({ tool: "circle" }));
+    expect(moved.preview).toEqual({ ellipse: { cx: 12, cy: 12, rx: 12, ry: 12 } });
+    up = pointerUp(start.draft, at(10, 24), world({ tool: "circle" }));
+    expect(up.commands[0]).toEqual({ type: "add", shape: { ellipse: { cx: 12, cy: 12, rx: 12, ry: 12 } } });
+  });
+
   it("Escape discards an in-progress shape", () => {
     let { draft } = pointerDown(none, at(5, 5), world({ tool: "ellipse" }));
     draft = pointerMove(draft, at(50, 40), world({ tool: "ellipse" })).draft;

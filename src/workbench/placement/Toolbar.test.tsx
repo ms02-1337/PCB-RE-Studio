@@ -70,6 +70,8 @@ const TOOL_TITLES = [
   "Select (V)",
   "Rect (R)",
   "Ellipse (E)",
+  "Square (S)",
+  "Circle (O)",
   "Polygon (P)",
   "Pan (H)",
   "Crop (C)",

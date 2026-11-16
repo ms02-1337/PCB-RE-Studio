@@ -1,5 +1,6 @@
 ﻿import { createEffect, createSignal, createMemo, For, Show } from "solid-js";
 import type { PlacementStore } from "../placement/store";
+import { ActionIcon } from "../ActionIcon";
 import type { Point } from "../placement/projectDoc";
 import {
   layerLabel,
@@ -48,6 +49,9 @@ export function createCopperEditor(
     title: string;
     choices: { id: string; name: string }[];
     confirm: (id: string, name: string) => void;
+    /** Runs when the dialog is dismissed without confirming (Cancel button,
+     * Escape or backdrop). */
+    cancel?: () => void;
   } | null>(null);
   const [choice, setChoice] = createSignal(""),
     [netName, setNetName] = createSignal("");
@@ -183,23 +187,37 @@ export function createCopperEditor(
     title: string,
     choices: { id: string; name: string }[],
     confirm: (id: string, name: string) => void,
+    cancel?: () => void,
   ) {
     setChoice(choices[0]?.id ?? "");
     setNetName("");
-    setModal({ title, choices, confirm });
+    setModal({ title, choices, confirm, cancel });
   }
   function netForZone(id: string) {
     const current = pcb();
     if (!current) return;
-    openModal("Zone net", current.nets ?? [], (netId, name) => {
-      if (pcb() !== current) return;
-      const next = copy();
-      const net = name.trim()
-        ? (next.nets?.find((n) => n.name === name.trim()) ?? newNet(next, name))
-        : next.nets?.find((n) => n.id === netId);
-      next.zones!.find((z) => z.id === id)!.netId = net?.id;
-      store.visual.replaceCopper(next.id, next);
-    });
+    openModal(
+      "Zone net",
+      current.nets ?? [],
+      (netId, name) => {
+        if (pcb() !== current) return;
+        const next = copy();
+        const net = name.trim()
+          ? (next.nets?.find((n) => n.name === name.trim()) ?? newNet(next, name))
+          : next.nets?.find((n) => n.id === netId);
+        next.zones!.find((z) => z.id === id)!.netId = net?.id;
+        store.visual.replaceCopper(next.id, next);
+      },
+      () => {
+        // Cancelling the net prompt destroys the just-drawn zone.
+        if (pcb() !== current) return;
+        const next = copy();
+        next.zones = next.zones?.filter((z) => z.id !== id);
+        store.visual.replaceCopper(next.id, next);
+        setSelected(null);
+        setMode("select");
+      },
+    );
   }
   function finish() {
     const p = pcb();
@@ -530,12 +548,46 @@ export function createCopperEditor(
       ctx.strokeStyle = "#ffcd11";
       ctx.lineWidth = mode() === "trace" ? draftWidth : 1.5 / scale;
       ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       [...points, ...(cursor ? [cursor] : [])].forEach((q, i) =>
         i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y),
       );
+      if (mode() === "zone") {
+        // Zones preview their fill while being drawn, like committed zones.
+        ctx.closePath();
+        ctx.fillStyle = "#ffcd11";
+        ctx.globalAlpha = 0.22;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
       ctx.stroke();
       ctx.restore();
+    } else if (enabled() && (mode() === "via" || mode() === "trace") && cursor && !drag && !modal()) {
+      // Transparent placement preview riding the cursor until the next click;
+      // committed elements keep their real (net) colors.
+      const unit = p.pxPerMm;
+      if (unit) {
+        const netColor =
+          p.nets?.find((n) => n.id === placementNet())?.color ?? "#a0a0a0";
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = netColor;
+        ctx.fillStyle = netColor;
+        if (mode() === "via") {
+          const d = diameter() * unit,
+            dr = drill() * unit;
+          ctx.beginPath();
+          ctx.arc(cursor.x, cursor.y, (d + dr) / 4, 0, Math.PI * 2);
+          ctx.lineWidth = (d - dr) / 2;
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(cursor.x, cursor.y, (width() * unit) / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
     }
   }
   const netSelect = (value: () => string, change: (id: string) => void) => (
@@ -568,15 +620,19 @@ export function createCopperEditor(
           </For>
         </select>
       </label>
+      <span class="ve-tool-separator" aria-hidden="true" />
       <For each={["select", "trace", "zone", "via"] as Mode[]}>
         {(m) => (
           <button
             aria-pressed={mode() === m}
+            aria-label={m === "select" ? "Select" : `Place ${m}`}
             disabled={!pcb() || (m !== "select" && !pcb()?.pxPerMm)}
             title={
               m !== "select" && !pcb()?.pxPerMm
                 ? "Calibrate the PCB first"
-                : undefined
+                : m === "select"
+                  ? "Select"
+                  : `Place ${m}`
             }
             onClick={() => {
               activate();
@@ -585,15 +641,21 @@ export function createCopperEditor(
               setSelected(null);
             }}
           >
-            {m === "select" ? "Select" : `Place ${m}`}
+            <ActionIcon name={m === "select" ? "Select tool" : `Place ${m}`} />
           </button>
         )}
       </For>
       <button
+        aria-label="Place component"
+        title="Place component"
         disabled={!pcb()}
-        onClick={() => { activate(); setMode("select"); placeComponent(); }}
+        onClick={() => {
+          activate();
+          setMode("select");
+          placeComponent();
+        }}
       >
-        Place component
+        <ActionIcon name="Place component" />
       </button>
     </>
   );
@@ -792,6 +854,7 @@ export function createCopperEditor(
         const restore = document.activeElement as HTMLElement | null;
         const close = () => {
           setModal(null);
+          state.cancel?.();
           restore?.focus();
         };
         return (
@@ -921,6 +984,7 @@ export function createCopperEditor(
         const handled = points.length > 0 || Boolean(selected());
         cancel();
         setSelected(null);
+        setMode("select");
         return handled;
       }
       if (key === "Enter" && points.length) {

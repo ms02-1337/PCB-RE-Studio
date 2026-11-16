@@ -16,6 +16,14 @@ export type VisualToolPrompt =
   | { kind: "calibrate"; spanPx: number }
   | { kind: "resizeAxis"; axis: "x" | "y"; spanPx: number };
 
+/** Measure never touches the captured image; this placeholder keeps the
+ * frozen begin(image) contract satisfied when no photograph exists. Its
+ * empty id is falsy, so the "target disappeared" guard never fires. */
+const MEASURE_PLACEHOLDER: VisualImage = {
+  id: "", name: "", assetHash: "", width: 0, height: 0, x: 0, y: 0,
+  flipH: false, flipV: false, visible: true, opacity: 1, locked: false,
+};
+
 export function VisualCanvas(props: {
   copper?: CopperEditor;
   copperFrame?: number;
@@ -191,7 +199,10 @@ export function VisualCanvas(props: {
     const tool = props.tool;
     const running = controller.tool();
     if (tool && running !== tool) {
-      const image = images().find((entry) => entry.id === props.selected);
+      // Measure needs no photograph selection: it falls back to the first
+      // image and finally a placeholder (plain canvas-px geometry).
+      const image = images().find((entry) => entry.id === props.selected)
+        ?? (tool === "measure" ? images()[0] ?? MEASURE_PLACEHOLDER : undefined);
       if (!image) { if (running) execute(controller.cancel()); props.onToolEnd(); return; }
       execute(controller.begin(tool, image, props.store.visual.activePcb()?.pxPerMm));
       controller.update(view()); redraw();

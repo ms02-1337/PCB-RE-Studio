@@ -77,7 +77,7 @@ it("joins atomically and undo restores separate nets", () => {
   expect(store.visual.activePcb()!.nets).toHaveLength(2);
   expect(store.visual.activePcb()!.traces).toHaveLength(2);
 });
-it("keeps zone overlaps manually netted and leaves cancelled naming netless", () => {
+it("destroys a zone whose net prompt is cancelled", () => {
   trace({ x: 0, y: 0 }, { x: 100, y: 0 });
   fireEvent.click(screen.getByRole("button", { name: "Place zone" }));
   editor.down({ x: -20, y: -20 }, 1, false, 0);
@@ -85,8 +85,10 @@ it("keeps zone overlaps manually netted and leaves cancelled naming netless", ()
   editor.down({ x: 120, y: 120 }, 1, false, 0);
   editor.finish();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(store.visual.activePcb()!.zones![0].netId).toBeUndefined();
+  expect(store.visual.activePcb()!.zones ?? []).toHaveLength(0);
   expect(store.visual.activePcb()!.nets).toHaveLength(1);
+  // Cancelling the prompt also returns the copper mode to Select.
+  expect(editor.mode()).toBe("select");
 });
 it("does not commit stale copper drags after a PCB change", () => {
   trace({ x: 0, y: 0 }, { x: 100, y: 0 });

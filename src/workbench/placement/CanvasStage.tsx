@@ -643,6 +643,8 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
       v: "select",
       r: "rect",
       e: "ellipse",
+      s: "square",
+      o: "circle",
       p: "polygon",
       h: "pan",
       c: "crop",

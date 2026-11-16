@@ -11,6 +11,8 @@ import { sceneBounds, fitScene } from "./sceneGeometry";
 const TOOLS: { tool: Tool; label: string; key: string }[] = [
   { tool: "rect", label: "Rect", key: "R" },
   { tool: "ellipse", label: "Ellipse", key: "E" },
+  { tool: "square", label: "Square", key: "S" },
+  { tool: "circle", label: "Circle", key: "O" },
   { tool: "polygon", label: "Polygon", key: "P" },
   { tool: "crop", label: "Crop", key: "C" },
   { tool: "select", label: "Select", key: "V" },
@@ -22,8 +24,10 @@ function ToolIcon(props: { tool: Tool }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
       {props.tool === "select" && <path d="M4 2.5 12 8l-4 .8L6.4 13z" />}
-      {props.tool === "rect" && <rect x="4" y="4" width="8" height="8" />}
-      {props.tool === "ellipse" && <circle cx="8" cy="8" r="4.5" />}
+      {props.tool === "rect" && <rect x="3" y="5" width="10" height="6" />}
+      {props.tool === "ellipse" && <ellipse cx="8" cy="8" rx="5" ry="3.2" />}
+      {props.tool === "square" && <rect x="4.5" y="4.5" width="7" height="7" />}
+      {props.tool === "circle" && <circle cx="8" cy="8" r="3.75" />}
       {props.tool === "polygon" && <path d="M8 3l5.5 4-2.1 6H4.6L2.5 7z" />}
       {props.tool === "pan" && (
         <path d="M5.6 8.7V4.9a1.3 1.3 0 0 1 2.6 0v3m0-3.4a1.3 1.3 0 0 1 2.6 0v4m0-1a1.3 1.3 0 0 1 2.6 0v2.8a4 4 0 0 1-4 4h-.9a5 5 0 0 1-4-2l-1.6-2.3a1.5 1.5 0 0 1 2.3-1.9l.4.5" />
@@ -114,10 +118,10 @@ export function Toolbar(props: { store: PlacementStore }) {
   return (
     <div class="pl-toolbar" role="toolbar" aria-label="Placement tools" aria-orientation="vertical">
       <For each={TOOLS}>
-        {(entry, index) => (<>
+        {(entry) => (<>
           {/* Groups (shapes | crop-area | select/pan) are separated by thin
            * lines only; one more separator before the zoom cluster below. */}
-          <Show when={index() === 3 || index() === 4}><span class="pl-toolbar-sep" aria-hidden="true" /></Show>
+          <Show when={entry.tool === "crop" || entry.tool === "select"}><span class="pl-toolbar-sep" aria-hidden="true" /></Show>
           <button
             class="pl-tool-btn"
             aria-pressed={store.tool() === entry.tool}

@@ -4,6 +4,12 @@ import { Switch, Match } from "solid-js";
 export function ActionIcon(props: { name: string }) {
   return <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true">
     <Switch fallback={<path d="M4 5h12v11H4zM7 2v6M13 2v6M7 11h6" />}>
+      {/* Copper placement tools (icon-only toolbar buttons). */}
+      <Match when={/^select tool$/i.test(props.name)}><path d="M4 3l5.6 14 2.2-6.2 6.2-2.2z" /></Match>
+      <Match when={/^place trace$/i.test(props.name)}><path d="M4 15h4.5l3-8H16" /></Match>
+      <Match when={/^place zone$/i.test(props.name)}><path d="M10 4l6 4.5-2.3 7H6.3L4 8.5z" /></Match>
+      <Match when={/^place via$/i.test(props.name)}><><circle cx="10" cy="10" r="6.2" /><circle cx="10" cy="10" r="2.6" /></></Match>
+      <Match when={/^place component$/i.test(props.name)}><><rect x="5.5" y="5.5" width="9" height="9" /><path d="M5.5 8.5h-2M5.5 11.5h-2M14.5 8.5h2M14.5 11.5h2M8.5 5.5v-2M11.5 5.5v-2M8.5 14.5v2M11.5 14.5v2" /></></Match>
       <Match when={/^unlock$/i.test(props.name)}><path d="M5 9h10v8H5zM8 9V6a3 3 0 0 1 6 0M10 12v2" /></Match>
       <Match when={/^view$|^hide$/i.test(props.name)}><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6Z M13 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0" />{props.name === "Hide" && <path d="M3 3l14 14" />}</Match>
       <Match when={/lock/i.test(props.name)}><path d="M5 9h10v8H5zM7 9V6a3 3 0 0 1 6 0v3M10 12v2" /></Match>

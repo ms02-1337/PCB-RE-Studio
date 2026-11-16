@@ -151,7 +151,7 @@ export function createComponentEditor(
               )}
             </For>
             <p>Footprint: {c.definition.footprint.name}</p>
-            <p>Symbol: {c.definition.symbol?.name ?? "Generic � unresolved"}</p>
+            <p>Symbol: {c.definition.symbol?.name ?? "Generic – unresolved"}</p>
             <button onClick={() => open([c.id])}>
               Change footprint / symbol
             </button>

@@ -37,16 +37,32 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
   const toolButtons: Partial<Record<VisualToolId, HTMLButtonElement>> = {};
   const selectedImage = createMemo(() => { const id = selected(); return id ? imagesById().get(id) ?? null : null; });
   /** Evaluated inside JSX expressions so enablement tracks the live selection. */
+  /** True when the canvas selection is a photograph: an image selection
+   * with no copper element or component holding the selection. Transform
+   * tools act on photographs only — components rotate and resize from
+   * the Selection details panel instead. */
+  const photoSelected = () => Boolean(selectedImage()) && !copper.selected() && !components.selected();
   const toolState = (tool: { id: VisualToolId; label: string; title: string }) => {
+    // Measure works anywhere on the canvas, with or without a selection.
+    if (tool.id === "measure") return { enabled: true, title: tool.title };
     const image = selectedImage();
     const locked = TRANSFORM_TOOLS.has(tool.id) && image?.locked === true;
+    if (TRANSFORM_TOOLS.has(tool.id)) {
+      const photo = photoSelected();
+      return {
+        enabled: photo && !locked,
+        title: !photo ? `${tool.label}: select a photograph first` : locked ? `${tool.label}: unlock the photograph first` : tool.title,
+      };
+    }
     return {
-      enabled: Boolean(image) && !locked,
-      title: !image ? `${tool.label}: select a photograph first` : locked ? `${tool.label}: unlock the photograph first` : tool.title,
+      enabled: Boolean(image),
+      title: !image ? `${tool.label}: select a photograph first` : tool.title,
     };
   };
   const activateTool = (id: VisualToolId) => {
     if (activeTool() === id) { setActiveTool(null); return; } // canvas cancels the controller
+    // Measure needs no photograph: it works on plain canvas geometry.
+    if (id === "measure") { setActiveTool(id); return; }
     const image = selectedImage();
     if (!image) return;
     if (TRANSFORM_TOOLS.has(id)) {
@@ -111,6 +127,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
   return <div class="visual-panel" onKeyDown={(event) => { if (event.key === "Escape") endCardDrag(); }}>
     <div class="ve-toolbar" role="toolbar" aria-label="Visual editor tools">
       <copper.Toolbar />
+      <span class="ve-tool-separator" aria-hidden="true" />
       <For each={TOOLS}>{(tool) =>
         <button ref={(element) => { toolButtons[tool.id] = element; }} aria-pressed={activeTool() === tool.id ? "true" : "false"} classList={{ "is-active": activeTool() === tool.id }} disabled={!toolState(tool).enabled} title={toolState(tool).title} onClick={() => activateTool(tool.id)}>{tool.label}</button>
       }</For>
