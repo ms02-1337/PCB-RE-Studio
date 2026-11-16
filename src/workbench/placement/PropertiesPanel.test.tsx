@@ -88,6 +88,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  // Clipboard stubs from the copy-button tests must not leak into other suites.
+  delete (navigator as { clipboard?: unknown }).clipboard;
 });
 
 it("offers the Projects tab when no project is open", () => {
@@ -184,6 +186,80 @@ it("locks disable every field except the lock toggle", async () => {
   const unlock = screen.getByRole("button", { name: "Lock" });
   expect(unlock.getAttribute("aria-pressed")).toBe("false");
   expect((screen.getByLabelText("Part number") as HTMLInputElement).disabled).toBe(false);
+});
+
+describe("copy field buttons", () => {
+  /** Doc whose component carries all five copyable values (locked by default). */
+  function copyableDoc(locked: boolean): ProjectDoc {
+    const doc = seededDoc();
+    doc.components.push({
+      id: "c1",
+      boardId: "b1",
+      refdes: "U1",
+      typeId: "ic",
+      shape: { rect: { x: 0, y: 0, w: 30, h: 20 } },
+      status: "identified",
+      locked,
+      partNumber: "LM358",
+      value: "10k",
+      datasheetUrl: "https://example.com/lm358.pdf",
+      description: "Dual op-amp",
+      notes: "Check rail",
+    });
+    return doc;
+  }
+
+  function stubClipboard(writeText: (text: string) => Promise<void>) {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  }
+
+  it("copies each field's committed value from a locked component; inputs stay disabled", async () => {
+    const writeText = vi.fn(async () => undefined);
+    stubClipboard(writeText);
+    const store = await makeStore(copyableDoc(true), "c1");
+    panel(store);
+    // Exactly the five copyable fields gain buttons — no others.
+    expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(5);
+    const expected: Array<[string, string]> = [
+      ["Part number", "LM358"],
+      ["Value", "10k"],
+      ["URL", "https://example.com/lm358.pdf"],
+      ["Description", "Dual op-amp"],
+      ["Notes", "Check rail"],
+    ];
+    expected.forEach(([label]) => {
+      const field = screen.getByLabelText(label) as HTMLInputElement | HTMLTextAreaElement;
+      expect(field.disabled).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: `Copy ${label}` }));
+    });
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(5));
+    expected.forEach(([, value], index) => {
+      expect(writeText).toHaveBeenNthCalledWith(index + 1, value);
+    });
+  });
+
+  it("still copies while unlocked, using the edited value at click time", async () => {
+    const writeText = vi.fn(async () => undefined);
+    stubClipboard(writeText);
+    const store = await makeStore(copyableDoc(false), "c1");
+    panel(store);
+    expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(5);
+    fireEvent.input(screen.getByLabelText("Part number"), { target: { value: "LM358N" } });
+    fireEvent.click(screen.getByRole("button", { name: "Copy Part number" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("LM358N"));
+  });
+
+  it("reports a friendly alert when the clipboard is missing or rejects", async () => {
+    stubClipboard(vi.fn(async () => { throw new Error("denied"); }));
+    const store = await makeStore(copyableDoc(true), "c1");
+    panel(store);
+    fireEvent.click(screen.getByRole("button", { name: "Copy Value" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("could not be copied"));
+    // A missing clipboard API surfaces the same message.
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    fireEvent.click(screen.getByRole("button", { name: "Copy Notes" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("could not be copied"));
+  });
 });
 
 it("duplicates with a fresh refdes and deletes unlocked components", async () => {

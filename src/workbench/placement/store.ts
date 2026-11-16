@@ -831,6 +831,7 @@ export function createPlacementStore(
     if (!current || current.locked) return;
     mutate((draft) => {
       draft.components = draft.components.filter((component) => component.id !== id);
+      for(const pcb of draft.visualEditor?.pcbs??[])for(const c of pcb.components??[])if(c.markingId===id)delete c.markingId;
     });
     if (selectedId() === id) setSelectedId(null);
   }
@@ -870,15 +871,13 @@ export function createPlacementStore(
     });
   }
 
-  /** Deleting a type in use reassigns its components to Unassigned, which is
-   * itself undeletable. */
+  /** Types in use are undeletable (deleteType never reassigns components);
+   * the built-in Unassigned fallback is undeletable too. Both are no-ops. */
   function deleteType(id: string): void {
     if (id === UNASSIGNED_TYPE_ID) return;
+    if (doc()?.components.some((component) => component.typeId === id)) return;
     mutate((draft) => {
       draft.types = draft.types.filter((type) => type.id !== id);
-      for (const component of draft.components) {
-        if (component.typeId === id) component.typeId = UNASSIGNED_TYPE_ID;
-      }
     });
   }
 
@@ -995,4 +994,5 @@ export function createPlacementStore(
 }
 
 export type PlacementStore = ReturnType<typeof createPlacementStore>;
+
 

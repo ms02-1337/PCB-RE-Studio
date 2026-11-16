@@ -2,7 +2,7 @@ import { it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import { Show } from "solid-js";
 import type { ProjectDoc } from "./projectDoc";
-import { SEED_TYPES, UNASSIGNED_TYPE_ID } from "./projectDoc";
+import { SEED_TYPES } from "./projectDoc";
 import { createPlacementStore, type PlacementStore } from "./store";
 import { COLOR_PALETTE } from "./color";
 import { TypeManager } from "./TypeManager";
@@ -59,18 +59,20 @@ it("lists types with usage counts and marks Unassigned undeletable", async () =>
   expect(unassignedDelete.disabled).toBe(true);
 });
 
-it("centers its overlay and shows read-only color dots instead of pickers", async () => {
+it("centers its overlay and shows an editable color swatch per type", async () => {
   const store = await makeStore();
   render(() => <TypeManager store={store} onClose={vi.fn()} />);
   const dialog = screen.getByRole("dialog", { name: "Manage component types" });
   expect(dialog.closest(".overlay")!.classList.contains("overlay--center")).toBe(true);
-  // No color/hex inputs anywhere: colors are display-only now.
-  expect(screen.queryByLabelText(/color for /i)).toBeNull();
-  expect(screen.queryByLabelText(/hex color for /i)).toBeNull();
-  expect(screen.queryByLabelText("New type color")).toBeNull();
-  const dots = dialog.querySelectorAll(".type-table .pl-chip-dot");
-  expect(dots.length).toBe(SEED_TYPES.length);
-  expect((dots[0] as HTMLElement).title).toMatch(/^#[0-9a-f]{6}$/);
+  // One native color input per row, seeded from the document. The
+  // TypeCombobox keeps the .pl-chip-dot styling elsewhere.
+  const swatches = dialog.querySelectorAll(".type-table input[type='color']");
+  expect(swatches.length).toBe(SEED_TYPES.length);
+  expect(dialog.querySelectorAll(".type-table .pl-chip-dot")).toHaveLength(0);
+  for (const type of SEED_TYPES) {
+    const swatch = screen.getByLabelText(`Color for ${type.name}`) as HTMLInputElement;
+    expect(swatch.value).toBe(type.color);
+  }
 });
 
 it("adds a type after validating the prefix", async () => {
@@ -95,7 +97,7 @@ it("adds a type after validating the prefix", async () => {
   expect(COLOR_PALETTE).toContain(relay!.color);
 }, 15000);
 
-it("renames inline; the color column stays read-only", async () => {
+it("renames inline and commits color swatch changes as single undo entries", async () => {
   const store = await makeStore();
   render(() => <TypeManager store={store} onClose={vi.fn()} />);
   fireEvent.click(screen.getAllByTitle("Rename this type")[0]);
@@ -104,11 +106,13 @@ it("renames inline; the color column stays read-only", async () => {
   fireEvent.keyDown(rename, { key: "Enter" });
   expect(store.doc()?.types.find((type) => type.id === "resistor")?.name).toBe("Resistor network");
 
-  // The former hex-input path is gone: editing colors happens elsewhere.
-  expect(screen.queryByLabelText("Hex color for Resistor network")).toBeNull();
-  expect(store.doc()?.types.find((type) => type.id === "resistor")?.color).toBe(
-    SEED_TYPES.find((type) => type.id === "resistor")!.color,
-  );
+  // A committed pick writes updateType once; undo restores the prior color.
+  const swatch = screen.getByLabelText("Color for Resistor network") as HTMLInputElement;
+  fireEvent.change(swatch, { target: { value: "#123456" } });
+  expect(store.doc()?.types.find((type) => type.id === "resistor")?.color).toBe("#123456");
+  expect(store.canUndo()).toBe(true);
+  store.undo();
+  expect(store.doc()?.types.find((type) => type.id === "resistor")?.color).toBe("#e5484d");
 });
 
 it("Escape closes the modal and restores focus to the invoking element", async () => {
@@ -143,25 +147,36 @@ it("Escape during an inline rename cancels the rename without closing the modal"
   expect(store.doc()?.types.find((type) => type.id === "resistor")?.name).toBe("Resistor");
 });
 
-it("deletes a used type after confirming reassignment to Unassigned", async () => {
+it("blocks deleting a type that components still use", async () => {
   const store = await makeStore();
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   render(() => <TypeManager store={store} onClose={vi.fn()} />);
-  fireEvent.click(screen.getAllByRole("button", { name: "Delete" }).find(
+  const icDelete = screen.getAllByRole("button", { name: "Delete" }).find(
     (button) => button.closest("tr")?.textContent?.includes("IC"),
-  )!);
-  expect(confirm).toHaveBeenCalledWith("1 component will be reassigned to Unassigned. Delete type 'IC'?");
-  await waitFor(() => expect(store.doc()?.types.find((type) => type.id === "ic")).toBeUndefined());
-  expect(store.doc()?.components[0].typeId).toBe(UNASSIGNED_TYPE_ID);
-});
-
-it("keeps a used type when the user cancels", async () => {
-  const store = await makeStore();
-  vi.spyOn(window, "confirm").mockReturnValue(false);
-  render(() => <TypeManager store={store} onClose={vi.fn()} />);
-  fireEvent.click(screen.getAllByRole("button", { name: "Delete" }).find(
-    (button) => button.closest("tr")?.textContent?.includes("IC"),
-  )!);
+  )! as HTMLButtonElement;
+  expect(icDelete.disabled).toBe(true);
+  expect(icDelete.title).toBe("Type 'IC' is used by 1 component and cannot be deleted");
+  fireEvent.click(icDelete);
+  expect(confirm).not.toHaveBeenCalled();
+  // The type and its component's assignment survive untouched.
   expect(store.doc()?.types.find((type) => type.id === "ic")).toBeTruthy();
   expect(store.doc()?.components[0].typeId).toBe("ic");
+});
+
+it("deletes an unused type after confirming and keeps it on cancel", async () => {
+  const store = await makeStore();
+  const confirm = vi.spyOn(window, "confirm");
+  confirm.mockReturnValue(true);
+  render(() => <TypeManager store={store} onClose={vi.fn()} />);
+  fireEvent.click(screen.getAllByRole("button", { name: "Delete" }).find(
+    (button) => button.closest("tr")?.textContent?.includes("Resistor"),
+  )!);
+  expect(confirm).toHaveBeenCalledWith("Delete type 'Resistor'?");
+  expect(store.doc()?.types.find((type) => type.id === "resistor")).toBeUndefined();
+  confirm.mockReturnValue(false);
+  fireEvent.click(screen.getAllByRole("button", { name: "Delete" }).find(
+    (button) => button.closest("tr")?.textContent?.includes("Capacitor"),
+  )!);
+  expect(confirm).toHaveBeenCalledWith("Delete type 'Capacitor'?");
+  expect(store.doc()?.types.find((type) => type.id === "capacitor")).toBeTruthy();
 });

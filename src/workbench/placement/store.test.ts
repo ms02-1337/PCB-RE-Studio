@@ -634,18 +634,22 @@ it("deleting an image retains independent scene components", async () => {
   expect(store.doc()!.activeBoardId).toBe(store.doc()!.boards[0].id);
 });
 
-it("deleting a used type reassigns to Unassigned; Unassigned survives", async () => {
+it("deleteType keeps in-use types and Unassigned; deletes unused types", async () => {
   const { store, bridge } = makeStore();
   bridge.openProject.mockResolvedValue(loaded(seededDoc()));
   await store.openProject("C:\\p.pcbre");
   store.addBoard({ name: "Front", asset: { hash: "a".repeat(64), size: 5, name: "f.png" }, width: 100, height: 80 });
   const boardId = store.doc()!.boards[0].id;
   store.addComponent({ boardId, typeId: "ic", shape: { rect: { x: 0, y: 0, w: 5, h: 5 } }, refdes: "U1" });
+  // A type any component still references is undeletable: silent no-op.
   store.deleteType("ic");
-  expect(store.doc()!.types.find((type) => type.id === "ic")).toBeUndefined();
-  expect(store.doc()!.components[0].typeId).toBe(UNASSIGNED_TYPE_ID);
+  expect(store.doc()!.types.find((type) => type.id === "ic")).toBeTruthy();
+  expect(store.doc()!.components[0].typeId).toBe("ic");
   store.deleteType(UNASSIGNED_TYPE_ID);
   expect(store.doc()!.types.find((type) => type.id === UNASSIGNED_TYPE_ID)).toBeTruthy();
+  // Unused types delete cleanly; nothing references them.
+  store.deleteType("resistor");
+  expect(store.doc()!.types.find((type) => type.id === "resistor")).toBeUndefined();
   store.addType({ name: "Relay", color: "#aa33cc", prefix: "K" });
   const relay = store.doc()!.types.find((type) => type.name === "Relay")!;
   store.updateType(relay.id, { color: "#bb44dd" });

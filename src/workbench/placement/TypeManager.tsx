@@ -1,7 +1,7 @@
 import { ActionIcon } from "../ActionIcon";
 // Component type manager modal (existing overlay pattern): add, rename,
-// delete with reassignment to Unassigned. Colors are read-only here; new
-// types get a random palette color.
+// edit colors inline, delete unused types. Types still used by components
+// (and the built-in Unassigned) cannot be deleted.
 
 import { For, Show, createSignal, onMount } from "solid-js";
 import type { PlacementStore } from "./store";
@@ -61,12 +61,7 @@ export function TypeManager(props: { store: PlacementStore; onClose: () => void 
   };
 
   const remove = (id: string, typeName: string) => {
-    const count = usedCount(id);
-    const message =
-      count > 0
-        ? `${count} component${count === 1 ? "" : "s"} will be reassigned to Unassigned. Delete type '${typeName}'?`
-        : `Delete type '${typeName}'?`;
-    if (window.confirm(message)) store.deleteType(id);
+    if (window.confirm(`Delete type '${typeName}'?`)) store.deleteType(id);
   };
 
   const commitRename = () => {
@@ -128,11 +123,15 @@ export function TypeManager(props: { store: PlacementStore; onClose: () => void 
                 {(type) => (
                   <tr>
                     <td>
-                      <span
-                        class="pl-chip-dot"
-                        style={{ background: type.color }}
-                        title={type.color}
-                        aria-hidden="true"
+                      {/* onChange (not onInput): mutate() keeps one undo entry
+                          per committed pick; the native picker fires input
+                          continuously while dragging. */}
+                      <input
+                        type="color"
+                        class="type-color-swatch"
+                        aria-label={`Color for ${type.name}`}
+                        value={type.color}
+                        onChange={(event) => store.updateType(type.id, { color: event.currentTarget.value })}
                       />
                     </td>
                     <td>
@@ -180,7 +179,15 @@ export function TypeManager(props: { store: PlacementStore; onClose: () => void 
                           </button>
                         }
                       >
-                        <button onClick={() => remove(type.id, type.name)}><ActionIcon name="Delete" />Delete</button>
+                        <button
+                          disabled={usedCount(type.id) > 0}
+                          title={
+                            usedCount(type.id) > 0
+                              ? `Type '${type.name}' is used by ${usedCount(type.id)} component${usedCount(type.id) === 1 ? "" : "s"} and cannot be deleted`
+                              : "Delete this type"
+                          }
+                          onClick={() => remove(type.id, type.name)}
+                        ><ActionIcon name="Delete" />Delete</button>
                       </Show>
                     </td>
                   </tr>

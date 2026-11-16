@@ -85,6 +85,21 @@ export function PropertiesPanel(props: {
     },
   });
 
+  /** Copies a field to the clipboard, re-reading the document at click time
+   * so the committed value (never a stale closure) is copied. Copying stays
+   * available while the component is locked; failures surface via the alert. */
+  const copyField = async (key: "partNumber" | "value" | "datasheetUrl" | "description" | "notes", label: string) => {
+    const id = component()?.id;
+    const value = (id ? store.doc()?.components.find((item) => item.id === id)?.[key] : undefined) ?? "";
+    setError("");
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(value);
+    } catch {
+      setError(`The ${label.toLowerCase()} could not be copied to the clipboard.`);
+    }
+  };
+
   const attachDatasheet = async () => {
     const id = component()?.id;
     if (!id) return;
@@ -224,11 +239,17 @@ export function PropertiesPanel(props: {
                 </div>
                 <label>
                   <span>Part number</span>
-                  <input disabled={component()!.locked} {...text("partNumber")} placeholder="e.g. LM358" />
+                  <div class="pl-copy-row">
+                    <input disabled={component()!.locked} {...text("partNumber")} placeholder="e.g. LM358" />
+                    <CopyFieldButton label="Part number" onClick={() => void copyField("partNumber", "Part number")} />
+                  </div>
                 </label>
                 <label>
                   <span>Value</span>
-                  <input disabled={component()!.locked} {...text("value")} placeholder="e.g. 10k" />
+                  <div class="pl-copy-row">
+                    <input disabled={component()!.locked} {...text("value")} placeholder="e.g. 10k" />
+                    <CopyFieldButton label="Value" onClick={() => void copyField("value", "Value")} />
+                  </div>
                 </label>
                 <label>
                   <span>Marking</span>
@@ -267,11 +288,14 @@ export function PropertiesPanel(props: {
                 <legend>Datasheet</legend>
                 <label>
                   <span>URL</span>
-                  <input
-                    disabled={component()!.locked}
-                    {...text("datasheetUrl")}
-                    placeholder="https://…"
-                  />
+                  <div class="pl-copy-row">
+                    <input
+                      disabled={component()!.locked}
+                      {...text("datasheetUrl")}
+                      placeholder="https://…"
+                    />
+                    <CopyFieldButton label="URL" onClick={() => void copyField("datasheetUrl", "URL")} />
+                  </div>
                 </label>
                 <Show
                   when={component()!.datasheetHash}
@@ -333,16 +357,25 @@ export function PropertiesPanel(props: {
                   <button disabled={preview() || component()!.locked || imageBusy()} title="Paste a component image from the clipboard (Ctrl+V / Cmd+V)" onClick={() => void attachImage(true)}><ActionIcon name="Paste" />Paste image</button>
                 </div>
               </fieldset>
-              <fieldset><legend>Description</legend><textarea aria-label="Description" rows={3} maxLength={4000} disabled={component()!.locked} {...text("description")} placeholder="Describe this component…" /></fieldset>
+              <fieldset>
+                <legend>Description</legend>
+                <div class="pl-copy-row">
+                  <textarea aria-label="Description" rows={3} maxLength={4000} disabled={component()!.locked} {...text("description")} placeholder="Describe this component…" />
+                  <CopyFieldButton label="Description" onClick={() => void copyField("description", "Description")} />
+                </div>
+              </fieldset>
               <fieldset>
                 <legend>Notes</legend>
-                <textarea
-                  aria-label="Notes"
-                  rows={4}
-                  disabled={component()!.locked}
-                  {...text("notes")}
-                  placeholder="Observations, measurements, hints…"
-                />
+                <div class="pl-copy-row">
+                  <textarea
+                    aria-label="Notes"
+                    rows={4}
+                    disabled={component()!.locked}
+                    {...text("notes")}
+                    placeholder="Observations, measurements, hints…"
+                  />
+                  <CopyFieldButton label="Notes" onClick={() => void copyField("notes", "Notes")} />
+                </div>
               </fieldset>
               <div class="pl-component-actions">                <button
                   aria-pressed={component()!.locked}
@@ -379,6 +412,19 @@ export function PropertiesPanel(props: {
         </Show>
       </Show>
     </aside>
+  );
+}
+
+/** Icon-only clipboard button beside a field value; always enabled so a
+ * locked component's committed values can still be copied out. */
+function CopyFieldButton(props: { label: string; onClick: () => void }) {
+  return (
+    <button
+      class="pl-copy"
+      aria-label={`Copy ${props.label}`}
+      title={`Copy ${props.label} to the clipboard`}
+      onClick={props.onClick}
+    ><ActionIcon name="Copy" /></button>
   );
 }
 

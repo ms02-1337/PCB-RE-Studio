@@ -437,6 +437,35 @@ button.pl-image-remove .action-icon {
   margin-right: 0;
 }
 
+/* Field value + trailing icon-only copy button. The button stays enabled
+   while the input beside it is disabled (locked component). */
+.pl-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pl-copy-row input,
+.pl-copy-row textarea {
+  flex: 1;
+  min-width: 0;
+}
+/* The button hugs the first line of a multi-line textarea. */
+.pl-copy-row textarea {
+  align-self: flex-start;
+}
+button.pl-copy {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button.pl-copy .action-icon {
+  margin-right: 0;
+}
+
 /* Component-photo viewer: centered overlay dialog with a zoom/pan stage. */
 .image-viewer {
   width: min(1100px, 94vw);
@@ -619,7 +648,7 @@ button.pl-combobox-add:hover:not(:disabled) {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-  padding: 10px 16px;
+  padding: 14px 16px;
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
@@ -772,7 +801,28 @@ button.pl-combobox-add:hover:not(:disabled) {
 .type-table td:first-child {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+}
+/* Compact rows: theme.css's 6px 10px button padding inflates the Name and
+   Delete cells above every other cell. */
+.type-table button {
+  padding: 4px 6px;
+}
+/* Square native color swatch; the pseudo-element resets are Chromium's
+   default inset wrapper/border around the color fill. */
+.type-table .type-color-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.type-table .type-color-swatch::-webkit-color-swatch {
+  border: none;
+}
+.type-table .type-color-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
 }
 .type-name {
   text-align: left;
@@ -798,4 +848,11 @@ button.pl-combobox-add:hover:not(:disabled) {
 }
 .type-add input[type="text"] {
   width: 110px;
+}
+/* Match the Add-type button to the 11px Name/Prefix inputs beside it (the
+   inputs inherit font: inherit from their 11px labels; theme.css buttons
+   would otherwise render at 13px with taller padding). */
+.type-add button {
+  padding: 4px 6px;
+  font-size: 11px;
 }
