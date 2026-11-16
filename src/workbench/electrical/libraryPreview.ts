@@ -1,5 +1,5 @@
 import type { ComponentDefinition, KGraphic, KPoint } from "../../bridge/kicad";
-import { terminalNumbers } from "./domain";
+import { footprintBounds, isPlaceholderText, terminalNumbers } from "./domain";
 import { padContours, padHole } from "./padGeometry";
 
 export interface PreviewBounds { left: number; top: number; right: number; bottom: number }
@@ -16,7 +16,7 @@ export function libraryPreviewBounds(d: ComponentDefinition | undefined, symbol:
       const a=g.points[0], b=g.points[1];
       if (!a) continue;
       const convert=(p:KPoint)=>({x:p.x,y:flipY?-p.y:p.y});
-      if(g.kind === "text") { const p=convert(a); text(g.text??"",p.x,p.y); continue; }
+      if(g.kind === "text") { if(isPlaceholderText(g)) continue; const p=convert(a); text(g.text??"",p.x,p.y); continue; }
       const pad=Math.max(0.15,g.width)/2;
       const pts=g.kind === "circle" && b ? (()=>{const r=Math.hypot(b.x-a.x,b.y-a.y);return [{x:a.x-r,y:a.y-r},{x:a.x+r,y:a.y+r}];})() : g.points;
       for(const p of pts) {const q=convert(p);points.push({x:q.x-pad,y:q.y-pad},{x:q.x+pad,y:q.y+pad});}
@@ -30,7 +30,8 @@ export function libraryPreviewBounds(d: ComponentDefinition | undefined, symbol:
         points.push(...padHole(p));
         text(p.number,p.x,p.y-p.height/2-0.25);
       }
-      text(d.referencePrefix,0,-2);
+      const b=footprintBounds(d.footprint);
+      if(b) text(d.referencePrefix,(b.minX+b.maxX)/2,b.minY-0.25); else text(d.referencePrefix,0,-2);
     } else if(d.symbol) {
       const units=d.symbol.units.filter(u=>(u.unit===1||u.unit===0)&&(u.bodyStyle===1||u.bodyStyle===0));
       graphics(units.flatMap(u=>u.graphics),true);

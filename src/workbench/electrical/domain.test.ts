@@ -2,7 +2,9 @@
 import { padCopperContains, padContours } from "./padGeometry";
 import {
   drawFootprint,
+  drawGraphics,
   createInstance,
+  footprintBounds,
   replacementBoards,
   ensureSchematic,
   terminalNumbers,
@@ -214,4 +216,53 @@ it("preserves inherited footprint opacity for every pad and restores the context
   drawFootprint(ctx, createInstance(board(), definition, { x: 0, y: 0 }, "front"), 1, "yellow");
   expect(fills).toEqual([0.35, 0.35]);
   expect(ctx.globalAlpha).toBe(0.5);
+});
+
+function fakeCtx() {
+  const texts: Array<{ text: string; x: number; y: number }> = [];
+  const state: Record<string, unknown> = {};
+  const ctx = new Proxy(state, {
+    get: (target, key) =>
+      key === "fillText"
+        ? (text: string, x: number, y: number) => texts.push({ text, x, y })
+        : target[key as string] ?? (() => {}),
+  }) as unknown as CanvasRenderingContext2D;
+  return { ctx, texts };
+}
+
+it("computes footprint bounds from graphics and pad extents, ignoring KiCad placeholders", () => {
+  const d = structuredClone(definition);
+  d.footprint.graphics = [
+    { kind: "line", points: [{ x: 12, y: 0 }, { x: 12, y: 3 }], width: 0.15, fill: false },
+    { kind: "text", points: [{ x: 100, y: 100 }], width: 0.15, fill: false, text: "${REFERENCE}" },
+    { kind: "text", points: [{ x: -5, y: 0 }], width: 0.15, fill: false, text: "220nF" },
+  ];
+  const b = footprintBounds(d.footprint)!;
+  expect(b.minX).toBeCloseTo(-5);
+  expect(b.maxX).toBeCloseTo(12.236);
+  expect(b.minY).toBeCloseTo(-2.236);
+  expect(b.maxY).toBeCloseTo(3);
+  expect(
+    footprintBounds({ ...d.footprint, graphics: [], pads: [] }),
+  ).toBeUndefined();
+});
+
+it("never paints KiCad field placeholder text but keeps real annotations", () => {
+  const { ctx, texts } = fakeCtx();
+  drawGraphics(ctx, [
+    { kind: "text", points: [{ x: 1, y: 2 }], width: 0.15, fill: false, text: "${REFERENCE}" },
+    { kind: "text", points: [{ x: 3, y: 4 }], width: 0.15, fill: false, text: "220nF" },
+  ]);
+  expect(texts).toEqual([{ text: "220nF", x: 3, y: 4 }]);
+});
+
+it("draws the reference centered above the top edge of the footprint extents", () => {
+  const { ctx, texts } = fakeCtx();
+  drawFootprint(ctx, createInstance(board(), definition, { x: 0, y: 0 }, "front"), 1, "yellow");
+  const label = texts.find((t) => t.text === "U1");
+  expect(label).toBeDefined();
+  expect(label!.x).toBeCloseTo(5);
+  expect(label!.y).toBeCloseTo(-2.486);
+  expect(ctx.textAlign).toBe("center");
+  expect(ctx.textBaseline).toBe("bottom");
 });

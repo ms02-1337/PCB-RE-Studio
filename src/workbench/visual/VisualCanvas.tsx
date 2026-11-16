@@ -2,7 +2,7 @@ import type { createComponentEditor } from "../electrical/ComponentEditor";
 import { Show, on, createSignal, createEffect, onCleanup, onMount } from "solid-js";
 import { assetRead } from "../../bridge/project";
 import { hitVisualImage, type VisualImage, type VisualPcb } from "./model";
-import { padPoint } from "../electrical/domain";
+import { padPoint, footprintBounds } from "../electrical/domain";
 import type { PlacementStore } from "../placement/store";
 import type { Point } from "../placement/projectDoc";
 import {
@@ -1023,22 +1023,13 @@ export function VisualCanvas(props: {
                   ) {
                     selectedComponents.add(c.id);
                   } else {
-                    const pts = c.definition.footprint.graphics.flatMap(
-                      (g) => g.points,
-                    );
-                    for (const pad of c.definition.footprint.pads) {
-                      const r = Math.hypot(pad.width, pad.height) / 2;
-                      pts.push(
-                        { x: pad.x - r, y: pad.y - r },
-                        { x: pad.x + r, y: pad.y + r },
-                      );
-                    }
-                    if (pts.length) {
+                    const b = footprintBounds(c.definition.footprint);
+                    if (b) {
                       const px = pcb?.pxPerMm ?? 1;
-                      const cMinX = c.x + Math.min(...pts.map((p) => p.x)) * px;
-                      const cMaxX = c.x + Math.max(...pts.map((p) => p.x)) * px;
-                      const cMinY = c.y + Math.min(...pts.map((p) => p.y)) * px;
-                      const cMaxY = c.y + Math.max(...pts.map((p) => p.y)) * px;
+                      const cMinX = c.x + b.minX * px;
+                      const cMaxX = c.x + b.maxX * px;
+                      const cMinY = c.y + b.minY * px;
+                      const cMaxY = c.y + b.maxY * px;
                       if (
                         cMinX <= maxX &&
                         cMaxX >= minX &&

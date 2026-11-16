@@ -3,7 +3,37 @@ import type { Point } from "../placement/projectDoc";
 import type { VisualPcb } from "../visual/model";
 import { visualId } from "../visual/model";
 import type { ElectricalComponent } from "./model";
-import type { ComponentDefinition, KGraphic } from "../../bridge/kicad";
+import type { ComponentDefinition, KFootprint, KGraphic } from "../../bridge/kicad";
+
+/** KiCad field placeholders (e.g. "${REFERENCE}") are substituted per placement, never painted literally. */
+export function isPlaceholderText(g: KGraphic): boolean {
+  return g.kind === "text" && (g.text?.includes("${") ?? false);
+}
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+/** Axis-aligned limit of the drawn footprint geometry (graphics anchors plus pad extents), in local units. */
+export function footprintBounds(fp: KFootprint): Bounds | undefined {
+  const points: Point[] = [];
+  for (const g of fp.graphics) {
+    if (isPlaceholderText(g)) continue;
+    points.push(...g.points);
+  }
+  for (const pad of fp.pads) {
+    const r = Math.hypot(pad.width, pad.height) / 2;
+    points.push({ x: pad.x - r, y: pad.y - r }, { x: pad.x + r, y: pad.y + r });
+  }
+  if (!points.length) return undefined;
+  return {
+    minX: Math.min(...points.map((p) => p.x)),
+    minY: Math.min(...points.map((p) => p.y)),
+    maxX: Math.max(...points.map((p) => p.x)),
+    maxY: Math.max(...points.map((p) => p.y)),
+  };
+}
 export function padPoint(
   c: ElectricalComponent,
   p: Point,
@@ -107,6 +137,7 @@ export function drawGraphics(
   graphics: KGraphic[],
 ) {
   for (const g of graphics) {
+    if (isPlaceholderText(g)) continue;
     ctx.lineWidth = g.width || 0.15;
     ctx.beginPath();
     const a = g.points[0],
@@ -165,8 +196,17 @@ export function drawFootprint(
     ctx.font = ".7px sans-serif";
     ctx.fillText(p.number, p.x, p.y - p.height / 2 - 0.25);
   }
-  ctx.font = "1px sans-serif";
-  ctx.fillText(c.reference, 0, -2);
+  const bounds = footprintBounds(c.definition.footprint);
+  if (c.reference) {
+    ctx.font = "1px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(
+      c.reference,
+      bounds ? (bounds.minX + bounds.maxX) / 2 : 0,
+      bounds ? bounds.minY - 0.25 : -2,
+    );
+  }
   ctx.restore();
 }
 export function replacementBoards(
@@ -240,16 +280,12 @@ export function componentContains(
   )
     return true;
   if (c.layerId !== layer) return false;
-  const points = c.definition.footprint.graphics.flatMap((g) => g.points);
-  for (const pad of c.definition.footprint.pads) {
-    const r = Math.hypot(pad.width, pad.height) / 2;
-    points.push({ x: pad.x - r, y: pad.y - r }, { x: pad.x + r, y: pad.y + r });
-  }
+  const b = footprintBounds(c.definition.footprint);
   return (
-    points.length > 0 &&
-    local.x >= Math.min(...points.map((p) => p.x)) &&
-    local.x <= Math.max(...points.map((p) => p.x)) &&
-    local.y >= Math.min(...points.map((p) => p.y)) &&
-    local.y <= Math.max(...points.map((p) => p.y))
+    !!b &&
+    local.x >= b.minX &&
+    local.x <= b.maxX &&
+    local.y >= b.minY &&
+    local.y <= b.maxY
   );
 }
