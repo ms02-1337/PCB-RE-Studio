@@ -289,8 +289,16 @@ export function SchematicPanel(props: {
   let routeOrigin: VisualPcb | undefined;
   let drag: { point: Point; previous: VisualPcb; units: string[] } | null =
     null;
-  let pan: { x: number; y: number; view: ReturnType<typeof view> } | null =
-    null;
+  let pan: {
+    x: number;
+    y: number;
+    view: ReturnType<typeof view>;
+    button: number;
+    moved: boolean;
+  } | null = null;
+  // Right-drag panning must not mutate wires: contextmenu arrives after
+  // pointerup on Windows and during the drag elsewhere.
+  let skipContextJoint = false;
   let svg!: SVGSVGElement;
   let scope = "";
   const doc = () => pcb()?.schematic ?? emptySchematic();
@@ -576,7 +584,14 @@ export function SchematicPanel(props: {
   };
   const place = (event: PointerEvent) => {
     if (event.button === 1 || event.button === 2) {
-      pan = { x: event.clientX, y: event.clientY, view: view() };
+      if (event.button === 2) skipContextJoint = false;
+      pan = {
+        x: event.clientX,
+        y: event.clientY,
+        view: view(),
+        button: event.button,
+        moved: false,
+      };
       svg.setPointerCapture?.(event.pointerId);
       return;
     }
@@ -734,6 +749,8 @@ export function SchematicPanel(props: {
     }
     if (pan) {
       const r = svg.getBoundingClientRect();
+      if (Math.abs(e.clientX - pan.x) + Math.abs(e.clientY - pan.y) > 2)
+        pan.moved = true;
       setView({
         ...pan.view,
         x: pan.view.x - ((e.clientX - pan.x) * pan.view.w) / (r.width || 1),
@@ -767,6 +784,7 @@ export function SchematicPanel(props: {
     const d = drag,
       offset = dragOffset();
     drag = null;
+    if (pan?.moved && pan.button === 2) skipContextJoint = true;
     pan = null;
     if (d && offset && pcb() === d.previous)
       edit((p) => {
@@ -819,6 +837,48 @@ export function SchematicPanel(props: {
       i ? orthogonal(resolved[i - 1], p).slice(1) : [p],
     );
     commitWires(previous, next, wireGroup(next.schematic.wires, target.id));
+  };
+  // Splits the wire at an arbitrary clicked position: the point projects onto
+  // the nearest segment and becomes a movable interior joint.
+  const addJointAt = (wireId: string, point: Point) => {
+    const previous = pcb(),
+      w = doc().wires.find((x) => x.id === wireId);
+    if (!previous || !w) return;
+    const resolved = resolveWireGeometry(previous, w);
+    let best = Infinity,
+      seg = -1,
+      spot: Point | null = null;
+    for (let i = 0; i + 1 < resolved.length; i++) {
+      const q = project(point, resolved[i], resolved[i + 1]),
+        d = distance(point, q);
+      if (d < best) {
+        best = d;
+        seg = i;
+        spot = q;
+      }
+    }
+    const a = seg >= 0 ? resolved[seg] : undefined,
+      b = seg >= 0 ? resolved[seg + 1] : undefined;
+    if (!spot || !a || !b || distance(a, b) < 1e-6) return;
+    if (distance(spot, a) < 1e-6 || distance(spot, b) < 1e-6) return;
+    const next = structuredClone(previous);
+    next.schematic ??= emptySchematic();
+    const target = next.schematic.wires.find((x) => x.id === w.id);
+    if (!target) return;
+    resolved.splice(seg + 1, 0, spot);
+    target.points = resolved.flatMap((p, i) =>
+      i ? orthogonal(resolved[i - 1], p).slice(1) : [p],
+    );
+    setSelectedWire(w.id);
+    commitWires(previous, next, wireGroup(next.schematic.wires, target.id));
+  };
+  // Right-drag pans suppress the trailing contextmenu so wires are not edited.
+  const contextJointOk = () => {
+    if (skipContextJoint) {
+      skipContextJoint = false;
+      return false;
+    }
+    return !pan?.moved;
   };
   const removeJoint = (index: number) => {
     const previous = pcb(),
@@ -1164,6 +1224,12 @@ export function SchematicPanel(props: {
                     setSelectedWire(w.id);
                   }
                 }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (tool() !== "select" || !contextJointOk()) return;
+                  addJointAt(w.id, coordinates(e));
+                }}
               />
             )}
           </For>
@@ -1175,10 +1241,10 @@ export function SchematicPanel(props: {
                   role="button"
                   tabindex="0"
                   aria-label={`Wire bend ${i() + 1}`}
-                  x={p.x - 0.7}
-                  y={p.y - 0.7}
-                  width="1.4"
-                  height="1.4"
+                  x={p.x - 0.5}
+                  y={p.y - 0.5}
+                  width="1"
+                  height="1"
                   fill="var(--accent)"
                   onPointerDown={(e) => {
                     e.stopPropagation();
@@ -1194,6 +1260,12 @@ export function SchematicPanel(props: {
                     e.stopPropagation();
                     removeJoint(i());
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!contextJointOk()) return;
+                    removeJoint(i());
+                  }}
                   onKeyDown={(e) => {
                     if (["Delete", "Backspace", "Enter", " "].includes(e.key)) {
                       e.preventDefault();
@@ -1203,7 +1275,8 @@ export function SchematicPanel(props: {
                   }}
                 >
                   <title>
-                    Drag to move; double-click or press Delete to remove
+                    Drag to move; double-click, right-click, or press Delete to
+                    remove
                   </title>
                 </rect>
               )}

@@ -357,6 +357,54 @@ it("adds and removes mid-wire joints with one undo entry each", async () => {
     key: "Delete",
   });
   expect(points()).toHaveLength(3);
+  store.undo();
+  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
+  // Right-click on the wire splits it at the clicked point and selects it.
+  fireEvent.contextMenu(svg.querySelector("polyline")!, {
+    clientX: 0,
+    clientY: 10,
+  });
+  expect(points()).toEqual([
+    { x: 0, y: 0 },
+    { x: 0, y: 10 },
+    { x: 0, y: 20 },
+    { x: 30, y: 20 },
+  ]);
+  expect(screen.getByRole("button", { name: "Wire bend 2" })).toBeTruthy();
+  store.undo();
+  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
+  // Right-click on an existing vertex adds nothing.
+  fireEvent.contextMenu(svg.querySelector("polyline")!, {
+    clientX: 0,
+    clientY: 20,
+  });
+  expect(points()).toEqual([
+    { x: 0, y: 0 },
+    { x: 0, y: 20 },
+    { x: 30, y: 20 },
+  ]);
+  // Right-click on a bend removes it.
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Wire bend 1" }));
+  expect(points()).toEqual([
+    { x: 0, y: 0 },
+    { x: 30, y: 0 },
+    { x: 30, y: 20 },
+  ]);
+  store.undo();
+  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
+  // A right-drag pan does not edit wires through the trailing contextmenu.
+  fireEvent.pointerDown(svg, { button: 2, clientX: 5, clientY: 5 });
+  fireEvent.pointerMove(svg, { clientX: 105, clientY: 105 });
+  fireEvent.pointerUp(svg, { button: 2, clientX: 105, clientY: 105 });
+  fireEvent.contextMenu(svg.querySelector("polyline")!, {
+    clientX: 0,
+    clientY: 10,
+  });
+  expect(points()).toEqual([
+    { x: 0, y: 0 },
+    { x: 0, y: 20 },
+    { x: 30, y: 20 },
+  ]);
   store.dispose();
 });
 it("renders joint handles only for the selected wire", async () => {
@@ -427,5 +475,10 @@ it("renders joint handles only for the selected wire", async () => {
   fireEvent.pointerDown(svg.querySelector("polyline")!, { button: 0 });
   expect(screen.getAllByRole("button", { name: /^Add joint/ })).toHaveLength(2);
   expect(screen.getAllByRole("button", { name: /^Wire bend/ })).toHaveLength(1);
+  expect(
+    screen
+      .getByRole("button", { name: "Wire bend 1" })
+      .getAttribute("width"),
+  ).toBe("1");
   store.dispose();
 });
