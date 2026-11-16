@@ -1,3 +1,4 @@
+import type { ElectricalComponent, SchematicDocument } from "../electrical/model";
 import type { AssetInfo, CropRect, Point } from "../placement/projectDoc";
 
 /** 2x2 linear part in canvas transform order: for ctx.transform(a, b, c, d, …)
@@ -21,7 +22,11 @@ export interface VisualImage {
    * validated |det| > 1e-9. Mirrored mappings (negative det) are allowed. */
   warp?: Warp2;
 }
-export interface VisualPcb { id: string; name: string; layers: string[]; images: VisualImage[]; /** World px per real mm, set by Calibrate; finite > 0; absent = uncalibrated. */ pxPerMm?: number }
+export interface CopperNet { id: string; name: string; color: string }
+export interface CopperTrace { id: string; layerId: string; points: Point[]; width: number; netId?: string }
+export interface CopperZone { id: string; layerId: string; points: Point[]; netId?: string }
+export interface CopperVia { id: string; x: number; y: number; diameter: number; drill: number; netId?: string }
+export interface VisualPcb { components?: ElectricalComponent[]; schematic?: SchematicDocument; id: string; name: string; layers: string[]; images: VisualImage[]; nets?: CopperNet[]; traces?: CopperTrace[]; zones?: CopperZone[]; vias?: CopperVia[]; /** World px per real mm. */ pxPerMm?: number }
 export interface VisualEditor { pcbs: VisualPcb[]; activePcbId: string }
 /** Resource ceiling, not a copper-stack preset. */
 export const MAX_VISUAL_LAYERS = 1024;
@@ -68,3 +73,4 @@ export function hitVisualImage(images: VisualImage[], x: number, y: number, opac
     return p.x >= r.x && p.y >= r.y && p.x <= r.x + r.w && p.y <= r.y + r.h;
   });
 }
+

@@ -1,3 +1,4 @@
+import { createComponentEditor } from "../electrical/ComponentEditor";
 import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
 import { isTauri } from "@tauri-apps/api/core";
 import type { PlacementStore } from "../placement/store";
@@ -9,6 +10,7 @@ import { VisualSettingsModal } from "./VisualSettingsModal";
 import { ValuePromptModal } from "./ValuePromptModal";
 import { VisualCanvas, type VisualToolPrompt } from "./VisualCanvas";
 import "./visual.css";
+import { createCopperEditor } from "./CopperEditor";
 
 const TOOLS: Array<{ id: VisualToolId; label: string; title: string }> = [
   { id: "measure", label: "Measure", title: "Measure distances between points" },
@@ -27,6 +29,9 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
   const imagesById = createMemo(() => new Map(visual.activePcb()?.images.map((image) => [image.id, image]) ?? []));
   const [selected, setSelected] = createSignal<string | null>(null);
   const [activeTool, setActiveTool] = createSignal<VisualToolId | null>(null);
+  const [copperFrame, setCopperFrame] = createSignal(0);
+  const copper = createCopperEditor(props.store, () => props.active && !activeTool(), () => setCopperFrame(n => n + 1), () => { setActiveTool(null); setPrompt(null); }, () => components.open());
+  const components = createComponentEditor(props.store, copper.layer, () => props.active && !activeTool() && copper.mode()==="select", () => setCopperFrame(n=>n+1),copper.selectLayer);
   const [flipX, setFlipX] = createSignal(false), [flipY, setFlipY] = createSignal(false);
   const [prompt, setPrompt] = createSignal<{ request: VisualToolPrompt; reply: (value: number | null) => void } | null>(null);
   const toolButtons: Partial<Record<VisualToolId, HTMLButtonElement>> = {};
@@ -105,6 +110,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
     onKeyDown={(e) => { if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return; e.preventDefault(); const current = side === "left" ? leftWidth() : rightWidth(); (side === "left" ? setLeftWidth : setRightWidth)(Math.max(220, Math.min(600, current + (e.key === "ArrowRight" ? 20 : -20) * (side === "left" ? 1 : -1)))); }} />;
   return <div class="visual-panel" onKeyDown={(event) => { if (event.key === "Escape") endCardDrag(); }}>
     <div class="ve-toolbar" role="toolbar" aria-label="Visual editor tools">
+      <copper.Toolbar />
       <button disabled={!props.store.doc() || !isTauri() || busy()} onClick={() => { setBusy(true); void props.store.addVisualImageFlow().finally(() => setBusy(false)); }}><ActionIcon name="Add image" />Add image</button>
       <For each={TOOLS}>{(tool) =>
         <button ref={(element) => { toolButtons[tool.id] = element; }} aria-pressed={activeTool() === tool.id ? "true" : "false"} classList={{ "is-active": activeTool() === tool.id }} disabled={!toolState(tool).enabled} title={toolState(tool).title} onClick={() => activateTool(tool.id)}>{tool.label}</button>
@@ -121,7 +127,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
         <div class="ve-heading"><Show when={leftOpen()}><h2>Images</h2></Show><button aria-label={leftOpen() ? "Hide images" : "Show images"} aria-expanded={leftOpen()} onClick={() => setLeftOpen(!leftOpen())}>{leftOpen() ? "‹" : "›"}</button></div>
         <Show when={leftOpen()}>
           <div class="ve-image-list">
-            <For each={[...(visual.activePcb()?.images ?? [])].reverse().map((image) => image.id)}>{(imageId) => { const initialImage = imagesById().get(imageId)!; const image = () => imagesById().get(imageId) ?? initialImage; return <article data-visual-image={image().id} class="ve-image-card" classList={{ selected: selected() === image().id, "is-dragging": dragSource() === image().id, "is-drop-target": dropTarget() === image().id }} onClick={() => setSelected(image().id)}>
+            <For each={[...(visual.activePcb()?.images ?? [])].reverse().map((image) => image.id)}>{(imageId) => { const initialImage = imagesById().get(imageId)!; const image = () => imagesById().get(imageId) ?? initialImage; return <article data-visual-image={image().id} class="ve-image-card" classList={{ selected: selected() === image().id, "is-dragging": dragSource() === image().id, "is-drop-target": dropTarget() === image().id }} onClick={() => { setSelected(image().id); if (image().layerId) copper.selectLayer(image().layerId!); }}>
               <div class="ve-card-header">
                 <button id={`ve-reorder-${image().id}`} class="ve-icon ve-reorder" title="Drag to reorder; arrow keys move image in stack" aria-label={`Reorder ${image().name}`} onPointerDown={(event) => {
                   if (event.button !== 0 || !props.active) return;
@@ -144,12 +150,13 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
         </Show>
       </aside>
       <Show when={leftOpen()}>{separator("left")}</Show>
-      <VisualCanvas store={props.store} selected={selected()} select={setSelected} active={props.active} opacityDraft={opacityDraft()} tool={activeTool()} flipX={flipX()} flipY={flipY()} onToolEnd={() => setActiveTool(null)} onPrompt={(request, reply) => setPrompt({ request, reply })} />
+      <VisualCanvas copper={copper} copperFrame={copperFrame()} store={props.store} selected={selected()} select={setSelected} active={props.active} opacityDraft={opacityDraft()} tool={activeTool()} flipX={flipX()} flipY={flipY()} onToolEnd={() => setActiveTool(null)} onPrompt={(request, reply) => setPrompt({ request, reply })} />
       <Show when={rightOpen()}>{separator("right")}</Show>
-      <aside class="ve-sidebar ve-right" aria-label="Selection details" style={{ width: rightOpen() ? `${rightWidth()}px` : "34px" }}><div class="ve-heading"><Show when={rightOpen()}><h2>Selection details</h2></Show><button aria-label={rightOpen() ? "Hide selection details" : "Show selection details"} aria-expanded={rightOpen()} onClick={() => setRightOpen(!rightOpen())}>{rightOpen() ? "›" : "‹"}</button></div></aside>
+      <aside class="ve-sidebar ve-right" aria-label="Selection details" style={{ width: rightOpen() ? `${rightWidth()}px` : "34px" }}><div class="ve-heading"><Show when={rightOpen()}><h2>Selection details</h2></Show><button aria-label={rightOpen() ? "Hide selection details" : "Show selection details"} aria-expanded={rightOpen()} onClick={() => setRightOpen(!rightOpen())}>{rightOpen() ? "›" : "‹"}</button></div><Show when={rightOpen()}><Show when={components.current()} fallback={<copper.Inspector />}><components.Inspector /></Show></Show></aside>
     </div>
     <div class="ve-tabs" role="toolbar" aria-label="Visual editor PCBs"><For each={visual.editor()?.pcbs}>{(pcb) => <Show when={renaming() !== pcb.id} fallback={renameInput(true)}><button aria-current={visual.activePcb()?.id === pcb.id ? "true" : undefined} onClick={() => visual.activate(pcb.id)} onDblClick={() => startRename(pcb.id, pcb.name)} onContextMenu={(e) => { e.preventDefault(); setTabMenu({ id: pcb.id, name: pcb.name, x: e.clientX, y: e.clientY, target: e.currentTarget }); }} onKeyDown={(e) => { if (e.key === "F2") startRename(pcb.id, pcb.name); if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); const rect = e.currentTarget.getBoundingClientRect(); setTabMenu({ id: pcb.id, name: pcb.name, x: rect.left, y: rect.top, target: e.currentTarget }); } }}>{pcb.name}</button></Show>}</For><button aria-label="Add visual PCB" disabled={!props.store.doc()} onClick={() => visual.addPcb()}>+</button></div>
     <Show when={settingsOpen()}><VisualSettingsModal store={props.store} restoreFocusTo={settingsButton ?? null} onClose={() => setSettingsOpen(false)} /></Show>
+    <components.Manager /><copper.Dialog />
     <Show when={prompt()} keyed>{(state) => <ValuePromptModal
       title={state.request.kind === "calibrate" ? "Calibrate PCB scale" : `Set real ${state.request.axis === "x" ? "width" : "height"}`}
       message={state.request.kind === "calibrate"

@@ -86,7 +86,7 @@ pub fn save_doc(
             return Err(ProjectError::missing_blob(hash));
         }
     }
-    let json = serde_json::to_string(doc).map_err(|error| {
+    let json = crate::kicad::codec::encode(doc).map_err(|error| {
         ProjectError::save_failed(format!("could not encode project.json: {error}"))
     })?;
     let bytes = write_container(target, &json, &blobs)?;

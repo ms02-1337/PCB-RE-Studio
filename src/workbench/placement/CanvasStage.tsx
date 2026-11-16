@@ -171,7 +171,7 @@ export function CanvasStage(props: { store: PlacementStore; onAddBoard: () => vo
     // Screen-space overlays: labels, padlocks, rubber band, handles.
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     const transform = (p: Point) => imageToScreen(currentView, active, p);
-    if (isActive && store.boardSelected()) {
+    if (isActive && store.boardSelected() && !active.locked) {
       const rect = visibleImageRect(active);
       const corners = [{ x: rect.x, y: rect.y }, { x: rect.x + rect.w, y: rect.y }, { x: rect.x + rect.w, y: rect.y + rect.h }, { x: rect.x, y: rect.y + rect.h }].map(transform);
       context.strokeStyle = ACCENT; context.lineWidth = 1.5;

@@ -63,3 +63,12 @@
 .ve-value-field input { margin-bottom:0; }
 .ve-value-error { color:var(--danger); margin:8px 0 0; font-size:12px; }
 .ve-value-confirm { background:var(--accent); color:#181818; border-color:var(--accent); }
+.ve-copper-inspector { display: grid; gap: 12px; padding: 12px; overflow: auto; }
+.ve-copper-inspector label { display: grid; gap: 4px; }
+.ve-copper-inspector input, .ve-copper-inspector select { min-width: 0; width: 100%; }
+.ve-toolbar { flex-wrap: wrap; }
+.ve-nets { height: 100%; overflow: auto; padding: 16px; }
+.ve-nets > label, .ve-nets form { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+.ve-net-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0; align-items: center; border-bottom: 1px solid var(--border); }
+.ve-net-row input[type="color"] { width: 34px; padding: 2px; }
+.component-manager{width:min(1200px,95vw);max-height:92vh;display:flex;flex-direction:column}.component-manager-body{display:grid;grid-template-columns:240px 1fr;overflow:auto;min-height:0}.component-manager-body aside,.component-manager-body main{padding:12px;overflow:auto}.component-manager-body aside{border-right:1px solid var(--border)}.component-previews{display:flex;flex-wrap:wrap}.component-previews canvas{width:100%;max-width:400px;background:#202020}.component-fields{display:flex;gap:8px;flex-wrap:wrap}.component-fields label,.component-inspector label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.library-results{display:flex;flex-wrap:wrap;gap:4px;max-height:180px;overflow:auto}.component-manager table,.component-inspector table{width:100%;text-align:left}.component-manager input,.component-manager select{max-width:100%}.component-inspector{padding:12px;overflow:auto}

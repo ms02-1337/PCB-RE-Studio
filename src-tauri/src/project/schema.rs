@@ -252,11 +252,61 @@ pub struct VisualPcb {
     pub name: String,
     pub layers: Vec<String>,
     pub images: Vec<VisualImage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nets: Vec<CopperNet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub traces: Vec<CopperTrace>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zones: Vec<CopperZone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vias: Vec<CopperVia>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<crate::kicad::types::ElectricalComponent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schematic: Option<crate::kicad::types::SchematicDocument>,
     /// World px per real mm, set by Calibrate; finite > 0; absent =
     /// uncalibrated. Additive v1 option (ADR 0003 pattern): legacy files
     /// stay byte-identical on reload+save.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub px_per_mm: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopperNet {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopperTrace {
+    pub id: String,
+    pub layer_id: String,
+    pub points: Vec<Point>,
+    pub width: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_id: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopperZone {
+    pub id: String,
+    pub layer_id: String,
+    pub points: Vec<Point>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_id: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopperVia {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub diameter: f64,
+    pub drill: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_id: Option<String>,
 }
 /// 2x2 linear part in canvas transform order: for ctx.transform(a, b, c, d, …)
 /// a point maps x' = a·x + c·y (+ e), y' = b·x + d·y (+ f).
@@ -402,6 +452,119 @@ fn validate_shape(shape: &Shape, errors: &mut Vec<String>) {
 }
 
 /// Full-document validation performed before every write and after every load.
+fn copper_segment_intersects(a: Point, b: Point, c: Point, d: Point) -> bool {
+    let cross =
+        |p: Point, q: Point, r: Point| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    let on = |p: Point, q: Point, r: Point| {
+        r.x >= p.x.min(q.x) && r.x <= p.x.max(q.x) && r.y >= p.y.min(q.y) && r.y <= p.y.max(q.y)
+    };
+    let (ac, ad, ca, cb) = (
+        cross(a, b, c),
+        cross(a, b, d),
+        cross(c, d, a),
+        cross(c, d, b),
+    );
+    (ac.signum() != ad.signum()
+        && ca.signum() != cb.signum()
+        && ac != 0.0
+        && ad != 0.0
+        && ca != 0.0
+        && cb != 0.0)
+        || (ac == 0.0 && on(a, b, c))
+        || (ad == 0.0 && on(a, b, d))
+        || (ca == 0.0 && on(c, d, a))
+        || (cb == 0.0 && on(c, d, b))
+}
+
+fn valid_copper_polygon(points: &[Point]) -> bool {
+    if points.len() < 3 || points.len() > 4096 || !points.iter().all(|p| finite(&[p.x, p.y])) {
+        return false;
+    }
+    let n = points.len();
+    let mut area = 0.0;
+    for i in 0..n {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        if a == b {
+            return false;
+        }
+        area += a.x * b.y - b.x * a.y;
+        // Adjacent edges may share a vertex, but must not double back.
+        let c = points[(i + 2) % n];
+        let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        if cross == 0.0 && (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y) < 0.0 {
+            return false;
+        }
+        for j in (i + 1)..n {
+            if j == i + 1 || (i == 0 && j == n - 1) {
+                continue;
+            }
+            if copper_segment_intersects(a, b, points[j], points[(j + 1) % n]) {
+                return false;
+            }
+        }
+    }
+    area.is_finite() && area.abs() > 0.0
+}
+
+fn validate_copper(pcb: &VisualPcb, errors: &mut Vec<String>) {
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    for net in &pcb.nets {
+        if net.id.trim().is_empty()
+            || !ids.insert(net.id.clone())
+            || net.name.trim().is_empty()
+            || !names.insert(net.name.trim())
+            || !is_valid_color(&net.color)
+        {
+            errors.push("invalid or duplicate copper net identity, name, or color".into());
+        }
+    }
+    let net_ids = ids.clone();
+    let mut check = |id: &String, net: &Option<String>, layer: Option<&String>| {
+        if id.trim().is_empty() || !ids.insert(id.clone()) {
+            errors.push("invalid or duplicate copper element identity".into());
+        }
+        if net.as_ref().is_some_and(|n| !net_ids.contains(n)) {
+            errors.push("copper net is not in its PCB".into());
+        }
+        if layer.is_some_and(|l| !pcb.layers.contains(l)) {
+            errors.push("copper layer is not in its PCB".into());
+        }
+    };
+    for trace in &pcb.traces {
+        check(&trace.id, &trace.net_id, Some(&trace.layer_id));
+    }
+    for zone in &pcb.zones {
+        check(&zone.id, &zone.net_id, Some(&zone.layer_id));
+    }
+    for via in &pcb.vias {
+        check(&via.id, &via.net_id, None);
+    }
+    for trace in &pcb.traces {
+        if !trace.width.is_finite()
+            || trace.width <= 0.0
+            || trace.points.len() < 2
+            || !trace.points.iter().all(|p| finite(&[p.x, p.y]))
+            || trace.points.windows(2).any(|p| p[0] == p[1])
+        {
+            errors.push("invalid copper trace geometry or width".into());
+        }
+    }
+    for zone in &pcb.zones {
+        if !valid_copper_polygon(&zone.points) {
+            errors.push("invalid copper zone polygon (3 to 4096 vertices required)".into());
+        }
+    }
+    for via in &pcb.vias {
+        if !finite(&[via.x, via.y, via.diameter, via.drill])
+            || via.drill <= 0.0
+            || via.diameter <= via.drill
+        {
+            errors.push("invalid copper via geometry or drill".into());
+        }
+    }
+}
+
 pub fn validate(doc: &ProjectDoc) -> ProjectResult<()> {
     let mut errors = Vec::new();
 
@@ -450,6 +613,8 @@ pub fn validate(doc: &ProjectDoc) -> ProjectResult<()> {
                     errors.push("invalid or duplicate visual layer identity".into());
                 }
             }
+            validate_copper(pcb, &mut errors);
+            crate::kicad::validate_pcb(pcb, &mut errors);
             for image in &pcb.images {
                 if image.id.trim().is_empty()
                     || !image_ids.insert(&image.id)
@@ -829,6 +994,85 @@ pub fn referenced_hashes(doc: &ProjectDoc) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn copper_doc() -> ProjectDoc {
+        let mut value = serde_json::to_value(visual_doc()).unwrap();
+        let pcb = &mut value["visualEditor"]["pcbs"][0];
+        pcb["nets"] = serde_json::json!([{ "id": "net-1", "name": "GND", "color": "#aabbcc" }]);
+        pcb["traces"] = serde_json::json!([{ "id": "trace-1", "layerId": "front", "netId": "net-1", "width": 2, "points": [{"x":0,"y":0},{"x":10,"y":0}] }]);
+        pcb["zones"] = serde_json::json!([{ "id": "zone-1", "layerId": "back", "points": [{"x":0,"y":0},{"x":10,"y":0},{"x":0,"y":10}] }]);
+        pcb["vias"] = serde_json::json!([{ "id": "via-1", "netId": "net-1", "x": 10, "y": 0, "diameter": 4, "drill": 2 }]);
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn copper_roundtrip_and_legacy_omission() {
+        let doc = copper_doc();
+        validate(&doc).unwrap();
+        let bytes = serde_json::to_vec(&doc).unwrap();
+        assert_eq!(doc, serde_json::from_slice(&bytes).unwrap());
+        let legacy = serde_json::to_value(visual_doc()).unwrap();
+        for field in ["nets", "traces", "zones", "vias"] {
+            assert!(legacy["visualEditor"]["pcbs"][0].get(field).is_none());
+        }
+    }
+
+    #[test]
+    fn copper_rejects_invalid_references_and_geometry() {
+        for (field, value) in [
+            ("layerId", serde_json::json!("foreign")),
+            ("netId", serde_json::json!("missing")),
+            ("width", serde_json::json!(0)),
+            ("points", serde_json::json!([{"x":0,"y":0}])),
+            ("id", serde_json::json!("via-1")),
+        ] {
+            let mut doc = serde_json::to_value(copper_doc()).unwrap();
+            doc["visualEditor"]["pcbs"][0]["traces"][0][field] = value;
+            assert!(
+                validate(&serde_json::from_value(doc).unwrap()).is_err(),
+                "{field}"
+            );
+        }
+        let mut doc = copper_doc();
+        doc.visual_editor.as_mut().unwrap().pcbs[0].vias[0].drill = 4.0;
+        assert!(validate(&doc).is_err());
+        let mut doc = copper_doc();
+        doc.visual_editor.as_mut().unwrap().pcbs[0].traces[0].points[0].x = f64::NAN;
+        assert!(validate(&doc).is_err());
+        let mut doc = copper_doc();
+        doc.visual_editor.as_mut().unwrap().pcbs[0].vias[0].diameter = f64::INFINITY;
+        assert!(validate(&doc).is_err());
+        let mut doc = copper_doc();
+        doc.visual_editor.as_mut().unwrap().pcbs[0].nets[0].color = "red".into();
+        assert!(validate(&doc).is_err());
+    }
+
+    #[test]
+    fn copper_rejects_self_intersecting_or_degenerate_zones() {
+        for points in [
+            vec![
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 10.0, y: 10.0 },
+                Point { x: 0.0, y: 10.0 },
+                Point { x: 10.0, y: 0.0 },
+            ],
+            vec![
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 10.0, y: 0.0 },
+                Point { x: 20.0, y: 0.0 },
+            ],
+            vec![
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 10.0, y: 0.0 },
+                Point { x: 5.0, y: 0.0 },
+                Point { x: 5.0, y: 10.0 },
+            ],
+        ] {
+            let mut doc = copper_doc();
+            doc.visual_editor.as_mut().unwrap().pcbs[0].zones[0].points = points;
+            assert!(validate(&doc).is_err());
+        }
+    }
+
     fn visual_doc() -> ProjectDoc {
         let mut doc = sample_doc();
         let hash = doc.boards[0].asset_hash.clone();
@@ -839,6 +1083,12 @@ mod tests {
                 name: "PCB".into(),
                 layers: vec!["front".into(), "back".into()],
                 px_per_mm: Some(3.78),
+                nets: vec![],
+                traces: vec![],
+                zones: vec![],
+                vias: vec![],
+                components: vec![],
+                schematic: None,
                 images: vec![VisualImage {
                     id: "photo".into(),
                     name: "Back photo".into(),

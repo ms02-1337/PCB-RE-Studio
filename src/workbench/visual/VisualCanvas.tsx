@@ -1,3 +1,4 @@
+import type { createComponentEditor } from "../electrical/ComponentEditor";
 import { createSignal, createEffect, onCleanup, onMount } from "solid-js";
 import { assetRead } from "../../bridge/project";
 import { hitVisualImage, type VisualImage } from "./model";
@@ -6,6 +7,7 @@ import type { Point } from "../placement/projectDoc";
 import { createVisualToolController, type OverlayView, type ToolIntent, type VisualToolId } from "./toolController";
 import { effectiveVisualTransform, imageAnchor, imageLinear, worldAabb, worldFootprint, worldToSource } from "./transform";
 import { drawVisualOverlays, screenToBase, screenToWorld } from "./overlays";
+import type { CopperEditor } from "./CopperEditor";
 
 /** Prompt requests forwarded to the panel (which owns the value modal),
  * together with a reply seam back into the controller: a positive number
@@ -15,6 +17,9 @@ export type VisualToolPrompt =
   | { kind: "resizeAxis"; axis: "x" | "y"; spanPx: number };
 
 export function VisualCanvas(props: {
+  copper?: CopperEditor;
+  copperFrame?: number;
+  components?: ReturnType<typeof createComponentEditor>;
   store: PlacementStore;
   selected: string | null;
   select: (id: string | null) => void;
@@ -46,7 +51,7 @@ export function VisualCanvas(props: {
   const [retry, setRetry] = createSignal(0);
   const [toast, setToast] = createSignal<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
-  const images = () => props.store.visual.activePcb()?.images ?? [];
+  const images = () => (props.store.visual.activePcb()?.images ?? []).filter(image => !props.copper || !image.layerId || image.layerId === props.copper.layer());
   const redraw = () => { if (!frame && !disposed) frame = requestAnimationFrame(draw); };
   const opacity = (image: VisualImage) => props.opacityDraft?.id === image.id ? props.opacityDraft.value : image.opacity;
   /** Drag-draft positions ride along through the transform seam so previews,
@@ -61,7 +66,32 @@ export function VisualCanvas(props: {
   // transform.ts seams: hit tests and fit bounds run through the pure pipeline
   // (transform-aware crop containment and the union world AABB).
   const toSource = (image: VisualImage, x: number, y: number): Point => worldToSource(displayed(image), { x, y });
-  const sceneAabb = (list: VisualImage[]) => worldAabb(list);
+  const visibleCopper = () => {
+    const pcb = props.store.visual.activePcb();
+    const layer = props.copper?.layer();
+    return {
+      traces: (pcb?.traces ?? []).filter((trace) => !layer || trace.layerId === layer),
+      zones: (pcb?.zones ?? []).filter((zone) => !layer || zone.layerId === layer),
+      vias: pcb?.vias ?? [],
+    };
+  };
+  const hasVisibleCopper = () => {
+    const copper = visibleCopper();
+    return copper.traces.length + copper.zones.length + copper.vias.length > 0;
+  };
+  const sceneAabb = (list: VisualImage[]) => {
+    const boxes = list.length ? [worldAabb(list)] : [];
+    const copper = visibleCopper();
+    for (const trace of copper.traces) {
+      for (const p of trace.points) boxes.push({ left: p.x - trace.width / 2, right: p.x + trace.width / 2, top: p.y - trace.width / 2, bottom: p.y + trace.width / 2 });
+    }
+    for (const zone of copper.zones) {
+      for (const p of zone.points) boxes.push({ left: p.x, right: p.x, top: p.y, bottom: p.y });
+    }
+    for (const via of copper.vias) boxes.push({ left: via.x - via.diameter / 2, right: via.x + via.diameter / 2, top: via.y - via.diameter / 2, bottom: via.y + via.diameter / 2 });
+    if (!boxes.length) return null;
+    return boxes.reduce((box, next) => ({ left: Math.min(box.left, next.left), right: Math.max(box.right, next.right), top: Math.min(box.top, next.top), bottom: Math.max(box.bottom, next.bottom) }));
+  };
   const reply = (value: number | null) => execute(controller.modalResult(value));
   /** Executes controller intents: document commits go through the store
    * (one mutate per commit), toasts stay local, prompts forward to the panel.
@@ -115,6 +145,11 @@ export function VisualCanvas(props: {
       }
     }
     ctx.restore();
+    ctx.save();
+    if (props.flipX) { ctx.translate(width, 0); ctx.scale(-1, 1); }
+    if (props.flipY) { ctx.translate(0, height); ctx.scale(1, -1); }
+    ctx.translate(offsetX, offsetY); ctx.scale(scale, scale);
+    props.components?.draw(ctx); props.copper?.draw(ctx, scale); ctx.restore();
     // Screen-space overlays run after the scene so the loupe self-copy reads
     // fully painted pixels.
     controller.update(view());
@@ -122,9 +157,9 @@ export function VisualCanvas(props: {
   }
   function fit() {
     const shown = images().filter((image) => image.visible && opacity(image) > 0);
-    if (!shown.length) { scale = 1; offsetX = offsetY = 30; redraw(); return; }
     const box = sceneAabb(shown);
-    const next = Math.max(0.001, Math.min(100, Math.min((width - 40) / (box.right - box.left), (height - 40) / (box.bottom - box.top))));
+    if (!box) { scale = 1; offsetX = offsetY = 30; redraw(); return; }
+    const next = Math.max(0.001, Math.min(100, Math.min(Math.max(1, width - 40) / Math.max(1, box.right - box.left), Math.max(1, height - 40) / Math.max(1, box.bottom - box.top))));
     scale = next;
     offsetX = (width - (box.right - box.left) * scale) / 2 - box.left * scale;
     offsetY = (height - (box.bottom - box.top) * scale) / 2 - box.top * scale;
@@ -133,7 +168,7 @@ export function VisualCanvas(props: {
   createEffect(() => {
     const nextIdentity = `${props.store.projectSession()}:${props.store.visual.activePcb()?.id}`;
     if (identity !== nextIdentity) { identity = nextIdentity; drag = null; scale = 1; offsetX = offsetY = 30; failed.clear(); setLoadError(""); setToast(null); }
-    const current = images(); void props.selected; void props.opacityDraft; retry();
+    const current = images(); void props.selected; void props.opacityDraft; void props.copperFrame; void props.store.visual.activePcb(); retry();
     if (!props.active) drag = null;
     const hashes = new Set(current.map((image) => image.assetHash));
     for (const [hash, bitmap] of cache) if (!hashes.has(hash)) { bitmap.close(); cache.delete(hash); }
@@ -188,7 +223,7 @@ export function VisualCanvas(props: {
     drag = null; redraw();
   };
   return <div class="ve-canvas" ref={host}>
-    <canvas ref={canvas} tabIndex={0} aria-label="Visual editor photographs" onContextMenu={(e) => e.preventDefault()}
+    <canvas ref={canvas} tabIndex={0} aria-label="Visual editor photographs" onContextMenu={(e) => e.preventDefault()} onDblClick={() => { if (!props.tool) props.copper?.finish(); }}
       onWheel={(e) => {
         e.preventDefault();
         // Convert the cursor to world space with the CURRENT mapping (flips
@@ -206,6 +241,9 @@ export function VisualCanvas(props: {
         e.preventDefault(); canvas.focus(); canvas.setPointerCapture(e.pointerId);
         const screen = canvasPoint(e);
         const world = screenToWorld(view(), screen);
+        // A right click closes a pending copper outline before the legacy
+        // right-drag pan takes ownership of this pointer.
+        if (!controller.tool() && e.button === 2 && props.copper?.down(world, scale, e.shiftKey, e.button)) { redraw(); return; }
         // Pan entry points: middle button under any tool; without a tool also
         // right-drag and Alt-drag (legacy behavior). Tool gestures use button 0.
         if (e.button === 1 || (!controller.tool() && (e.button === 2 || e.altKey))) {
@@ -218,6 +256,8 @@ export function VisualCanvas(props: {
           execute(controller.pointer({ phase: "down", world, screen, shift: e.shiftKey }));
           return;
         }
+        if (e.button===0 && props.components?.down(world)) { redraw(); return; }
+        if (props.copper?.down(world, scale, e.shiftKey, e.button)) { redraw(); return; }
         const hit = hitVisualImage(images(), world.x, world.y, opacity, toSource);
         props.select(hit?.id ?? null);
         if (hit?.locked) return;
@@ -228,6 +268,7 @@ export function VisualCanvas(props: {
       onPointerMove={(e) => {
         const screen = canvasPoint(e);
         const world = screenToWorld(view(), screen);
+        if (!controller.tool()) { props.components?.move(world); props.copper?.move(world, scale, e.shiftKey); }
         // An active pan (middle button) outranks the tool: it never started a gesture.
         if (drag && !drag.imageId) { // pan: keep the grabbed world point under the cursor
           const base = screenToBase(view(), screen);
@@ -252,6 +293,7 @@ export function VisualCanvas(props: {
         redraw();
       }}
       onPointerUp={(e) => {
+        if (!controller.tool()) { props.components?.up(screenToWorld(view(), canvasPoint(e))); props.copper?.up(screenToWorld(view(), canvasPoint(e))); }
         if (drag && !drag.imageId) { // finish a mid-tool pan
           end(true);
           if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
@@ -268,6 +310,7 @@ export function VisualCanvas(props: {
         if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
       }}
       onPointerCancel={(e) => {
+        props.components?.cancel(); props.copper?.cancelDrag();
         if (drag && !drag.imageId) { end(false); return; } // abort a mid-tool pan
         if (controller.tool()) { // no cancel gesture in the contract: end it
           const screen = canvasPoint(e);
@@ -277,8 +320,10 @@ export function VisualCanvas(props: {
         }
         end(false);
       }}
-      onLostPointerCapture={() => { if (!controller.tool() || (drag && !drag.imageId)) end(false); }}
+      onLostPointerCapture={() => { props.components?.cancel(); props.copper?.cancelDrag(); if (!controller.tool() || (drag && !drag.imageId)) end(false); }}
       onKeyDown={(e) => {
+        if (!controller.tool() && props.components?.key(e.key)) { e.preventDefault(); redraw(); return; }
+        if (!controller.tool() && props.copper?.key(e.key)) { e.preventDefault(); redraw(); return; }
         if (e.key === "Escape") {
           if (controller.tool()) { e.preventDefault(); execute(controller.cancel()); return; }
           end(false); props.select(null);
@@ -293,6 +338,6 @@ export function VisualCanvas(props: {
     <div class="ve-view-controls"><button onClick={fit}>Fit</button><button onClick={() => { scale = 1; redraw(); }}>100%</button></div>
     {toast() && <div class="ve-toast" role="status" aria-live="polite">{toast()}</div>}
     {loadError() && <div class="ve-load-error" role="alert">{loadError()} <button onClick={() => { failed.clear(); setLoadError(""); setRetry(retry() + 1); }}>Retry</button></div>}
-    {!images().length && <div class="ve-canvas-empty">Add photographs to compare PCB layers.</div>}
+    {!images().some((image) => image.visible && opacity(image) > 0) && !hasVisibleCopper() && <div class="ve-canvas-empty">Add photographs to compare PCB layers.</div>}
   </div>;
 }

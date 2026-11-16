@@ -1,4 +1,7 @@
+import { SchematicPanel } from "./electrical/SchematicPanel";
+import { BomPanel } from "./electrical/BomPanel";
 import { VisualPanel } from "./visual/VisualPanel";
+import { NetsPanel } from "./visual/NetsPanel";
 import { ActionIcon } from "./ActionIcon";
 import { createSignal, For, Show, onMount, onCleanup } from "solid-js";
 import { getAppInfo } from "../bridge/app-info";
@@ -84,12 +87,17 @@ function AboutDialog(props: {
           }
         }}
       >
-        <header class="dialog-header"><h2>PCB RE Studio</h2></header>
-        <div class="dialog-content"><p>{props.appInfo}</p></div>
+        <header class="dialog-header">
+          <h2>PCB RE Studio</h2>
+        </header>
+        <div class="dialog-content">
+          <p>{props.appInfo}</p>
+        </div>
         <div class="dialog-actions">
-        <button ref={closeButton} onClick={close}><ActionIcon name="Close" />
-          Close
-        </button>
+          <button ref={closeButton} onClick={close}>
+            <ActionIcon name="Close" />
+            Close
+          </button>
         </div>
       </section>
     </div>
@@ -178,7 +186,8 @@ export default function App(props: { projectName?: string }) {
         closeMenus();
       }}
     >
-      <ActionIcon name={label} />{label}
+      <ActionIcon name={label} />
+      {label}
     </button>
   );
   const applyAutosaveSettings = (settings: AutosaveSettings) => {
@@ -220,11 +229,20 @@ export default function App(props: { projectName?: string }) {
       if (event.defaultPrevented) return;
       if (settingsOpen()) return;
       const target = event.target instanceof Element ? event.target : null;
-      if ((activeTab() === 1 || activeTab() === 2) && (event.ctrlKey || event.metaKey) && !event.altKey && !target?.closest("input,textarea,select,[contenteditable],[role='dialog']") && !document.querySelector("[role='dialog']")) {
+      if (
+        (activeTab() === 1 || activeTab() === 2) &&
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !target?.closest(
+          "input,textarea,select,[contenteditable],[role='dialog']",
+        ) &&
+        !document.querySelector("[role='dialog']")
+      ) {
         const key = event.key.toLowerCase();
         if (key === "z" || key === "y") {
           event.preventDefault();
-          if (key === "y" || event.shiftKey) placement.redo(); else placement.undo();
+          if (key === "y" || event.shiftKey) placement.redo();
+          else placement.undo();
           return;
         }
       }
@@ -364,7 +382,9 @@ export default function App(props: { projectName?: string }) {
               </div>
             </details>
             <details>
-              <summary onClick={(event) => closeSiblingMenus(event.currentTarget)}>
+              <summary
+                onClick={(event) => closeSiblingMenus(event.currentTarget)}
+              >
                 Edit
               </summary>
               <div role="menu" aria-label="Edit">
@@ -388,7 +408,9 @@ export default function App(props: { projectName?: string }) {
               </div>
             </details>
             <details>
-              <summary onClick={(event) => closeSiblingMenus(event.currentTarget)}>
+              <summary
+                onClick={(event) => closeSiblingMenus(event.currentTarget)}
+              >
                 About
               </summary>
               <div role="menu" aria-label="About">
@@ -543,14 +565,55 @@ export default function App(props: { projectName?: string }) {
                     <Show
                       when={index() === 0}
                       fallback={
-                        <Show when={index() === 2} fallback={<div class="empty-state">
-                          <span class="empty-mark" aria-hidden="true">
-                            ▧
-                          </span>
-                          <h1>{name}</h1>
-                          <p>{`No ${name.toLowerCase()} content to display.`}</p>
-                          <p class="muted">Open a project to begin.</p>
-                        </div>}><VisualPanel store={placement} active={activeTab() === 2} /></Show>
+                        <Show
+                          when={index() === 2}
+                          fallback={
+                            <Show
+                              when={index() === 5}
+                              fallback={
+                                <Show
+                                  when={index() === 3}
+                                  fallback={
+                                    <BomPanel
+                                      store={placement}
+                                      onNavigate={componentId => {sessionStorage.setItem("electrical-navigation",JSON.stringify({componentId}));setActiveTab(2);}}
+                                      onReplace={(ids) => {
+                                        sessionStorage.setItem(
+                                          "component-replace",
+                                          JSON.stringify(ids),
+                                        );
+                                        setActiveTab(2);
+                                      }}
+                                    />
+                                  }
+                                >
+                                  <SchematicPanel
+                                    store={placement}
+                                    active={activeTab() === 3}
+                                    onNavigate={componentId => {sessionStorage.setItem("electrical-navigation",JSON.stringify({componentId}));setActiveTab(2);}}
+                                    onReplace={(ids) => {
+                                      sessionStorage.setItem(
+                                        "component-replace",
+                                        JSON.stringify(ids),
+                                      );
+                                      setActiveTab(2);
+                                    }}
+                                  />
+                                </Show>
+                              }
+                            >
+                              <NetsPanel
+                                store={placement}
+                                onNavigate={() => setActiveTab(2)}
+                              />
+                            </Show>
+                          }
+                        >
+                          <VisualPanel
+                            store={placement}
+                            active={activeTab() === 2}
+                          />
+                        </Show>
                       }
                     >
                       <div class="projects-workspace">

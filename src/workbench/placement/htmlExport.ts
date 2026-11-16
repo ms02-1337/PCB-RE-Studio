@@ -214,13 +214,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .scene { transform-origin: top left; }
 .photo-viewer { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; background: #000a; }
 .photo-viewer[hidden] { display: none; }
-.photo-dialog { display: flex; flex-direction: column; width: min(1100px, 96vw); max-height: 92vh; background: var(--bg); border: 1px solid var(--muted); border-radius: 4px; box-shadow: 0 12px 48px #0009; }
+.photo-dialog { display: flex; flex-direction: column; width: min(1100px, 96vw); max-height: 92vh; background: var(--bg); border: 0; border-radius: 4px; box-shadow: 0 12px 48px #0009; }
 .photo-dialog header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .photo-dialog h2 { margin: 0 auto 0 0; font-size: 14px; }
-.photo-stage { height: min(70vh, 700px); min-height: 140px; overflow: auto; padding: 12px; touch-action: none; cursor: grab; }
+.photo-stage { display: flex; height: min(70vh, 700px); min-height: 140px; overflow: auto; padding: 12px; touch-action: none; cursor: grab; }
 .photo-stage img { display: block; max-width: none; user-select: none; }
 .photo-stage.is-dragging { cursor: grabbing; }
-.photo-size { position: relative; overflow: hidden; }
+.photo-size { position: relative; flex: 0 0 auto; margin: auto; overflow: hidden; }
 .photo-size img { transform-origin: top left; }
 .photo-hint { margin: 0; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 12px; }
 .muted { color: var(--muted); }
@@ -310,7 +310,11 @@ const SCRIPT = `(function () {
     photoSize.style.height = height * photoZoom + "px";
     document.getElementById("photo-zoom-level").textContent = Math.round(photoZoom * 100) + "%";
   }
-  photoImage.addEventListener("load", function () { updatePhotoZoom(photoZoom); });
+  function centerPhoto() {
+    photoStage.scrollLeft = Math.max(0, (photoStage.scrollWidth - photoStage.clientWidth) / 2);
+    photoStage.scrollTop = Math.max(0, (photoStage.scrollHeight - photoStage.clientHeight) / 2);
+  }
+  photoImage.addEventListener("load", function () { updatePhotoZoom(photoZoom); centerPhoto(); });
   function closePhoto() {
     viewer.hidden = true;
     if (photoDrag && photoStage.hasPointerCapture && photoStage.hasPointerCapture(photoDrag.pointerId)) photoStage.releasePointerCapture(photoDrag.pointerId);
@@ -325,7 +329,7 @@ const SCRIPT = `(function () {
     photoImage.alt = image.alt;
     viewer.hidden = false;
     updatePhotoZoom(1);
-    photoStage.scrollLeft = 0; photoStage.scrollTop = 0;
+    centerPhoto();
     document.getElementById("close-photo").focus();
     if (tooltip) tooltip.style.display = "none";
   }
@@ -350,7 +354,7 @@ const SCRIPT = `(function () {
     updatePhotoZoom(photoZoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
   }, { passive: false });
   photoStage.addEventListener("pointerdown", function (event) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 && event.button !== 1) return;
     event.preventDefault();
     photoDrag = { x: event.clientX, y: event.clientY, left: photoStage.scrollLeft, top: photoStage.scrollTop, pointerId: event.pointerId };
     photoStage.classList.add("is-dragging");
@@ -361,6 +365,7 @@ const SCRIPT = `(function () {
     photoStage.scrollLeft = photoDrag.left + photoDrag.x - event.clientX;
     photoStage.scrollTop = photoDrag.top + photoDrag.y - event.clientY;
   });
+  photoStage.addEventListener("auxclick", function (event) { if (event.button === 1) event.preventDefault(); });
   ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (name) {
     photoStage.addEventListener(name, function () { photoDrag = null; photoStage.classList.remove("is-dragging"); });
   });
@@ -490,7 +495,7 @@ ${scenes.length ? `<nav class="tabs" role="tablist" aria-label="Mapping tabs">\n
       <button type="button" id="close-photo">Close photo</button>
     </header>
     <div class="photo-stage" id="photo-stage" tabindex="0" aria-label="Zoomable component photo"><div class="photo-size" id="photo-size"><img id="viewer-image" alt="" draggable="false" /></div></div>
-    <p class="photo-hint">Scroll to zoom. Drag to pan. Escape closes the photo.</p>
+    <p class="photo-hint">Scroll to zoom. Left- or middle-button drag to pan. Escape closes the photo.</p>
   </section>
 </div>
 <script>

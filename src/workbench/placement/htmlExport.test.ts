@@ -151,6 +151,27 @@ it("zooms the complete scene around the viewport center and leaves details unsca
   expect(scene.querySelector(".scene-overlay")).toBeTruthy();
 });
 
+it("centers oversized photos on load and pans with the middle button", () => {
+  const doc = liveReport();
+  doc.querySelector<HTMLElement>(".comp")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  doc.querySelector<HTMLButtonElement>(".photo-open")!.click();
+  const stage = doc.querySelector<HTMLElement>("#photo-stage")!;
+  Object.defineProperties(stage, {
+    scrollWidth: { value: 1400 }, clientWidth: { value: 800 },
+    scrollHeight: { value: 1000 }, clientHeight: { value: 600 },
+  });
+  doc.querySelector<HTMLImageElement>("#viewer-image")!.dispatchEvent(new Event("load"));
+  expect(stage.scrollLeft).toBe(300);
+  expect(stage.scrollTop).toBe(200);
+  expect(stage.dispatchEvent(pointer("pointerdown", 1, 100, 100))).toBe(false);
+  stage.dispatchEvent(pointer("pointermove", 1, 70, 60));
+  expect(stage.scrollLeft).toBe(330);
+  expect(stage.scrollTop).toBe(240);
+  stage.dispatchEvent(pointer("pointerup", 1, 70, 60));
+  stage.dispatchEvent(pointer("pointermove", 1, 0, 0));
+  expect(stage.scrollLeft).toBe(330);
+  expect(stage.dispatchEvent(new MouseEvent("auxclick", { button: 1, cancelable: true }))).toBe(false);
+});
 
 it("opens a photo viewer, zooms and pans it, contains focus and restores the photo trigger", () => {
   const doc = liveReport();

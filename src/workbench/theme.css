@@ -31,6 +31,7 @@ body {
   --ok: #3fb950;
   --overlay: #0006;
   --shadow: #0008;
+  --dialog-border: #626262;
   color-scheme: dark;
   background: var(--bg);
   color: var(--text);
@@ -53,6 +54,7 @@ body {
   --ok: #1a7f37;
   --overlay: #0003;
   --shadow: #0003;
+  --dialog-border: #a6a6a6;
   color-scheme: light;
 }
 button,
@@ -390,22 +392,24 @@ footer button {
   background: var(--overlay);
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  padding-top: 65px;
+  align-items: center;
+  padding: 24px;
   z-index: 10;
 }
-/* Centered variant for compact dialogs (type modals, image viewer);
-   About/Settings keep the top-aligned default above. */
+/* All modal variants share symmetric padding and viewport centering. */
 .overlay--center {
   align-items: center;
-  padding-top: 0;
-  padding-bottom: 24px;
+  padding: 24px;
 }
 .palette {
   width: min(560px, 90vw);
-  padding: 8px;
-  background: var(--raised);
-  border: 1px solid var(--border);
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--dialog-border);
+  border-radius: 5px;
+  max-height: calc(100dvh - 48px);
+  min-height: 0;
+  overflow: auto;
   box-shadow: 0 8px 30px var(--shadow);
   display: flex;
   flex-direction: column;
@@ -716,11 +720,14 @@ footer button {
 .settings-dialog {
   width: min(720px, 94vw);
   height: min(460px, 86vh);
-  min-height: 300px;
+  min-height: 0;
+  max-height: calc(100dvh - 48px);
+  border-radius: 5px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--raised);
-  border: 1px solid var(--border);
+  background: var(--bg);
+  border: 1px solid var(--dialog-border);
   box-shadow: 0 8px 30px var(--shadow);
 }
 .settings-header {
@@ -730,7 +737,7 @@ footer button {
   align-items: center;
   justify-content: space-between;
   padding: 0 10px 0 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--dialog-border);
 }
 .settings-header h2 {
   margin: 0;
@@ -803,6 +810,7 @@ footer button {
   margin-top: 24px;
 }
 .settings-actions {
+  background: var(--surface);
   flex: 0 0 42px;
   display: flex;
   justify-content: flex-end;
@@ -811,6 +819,11 @@ footer button {
   padding: 0 12px;
   border-top: 1px solid var(--border);
 }
+.dialog-header { padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--dialog-border); }
+.dialog-header h2 { margin: 0; text-transform: none; font-size: 13px; }
+.dialog-content { padding: 20px 16px; overflow: auto; }
+.dialog-content p { margin: 0; }
+.dialog-actions { display: flex; justify-content: flex-end; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--border); }
 .settings-actions .settings-apply {
   background: var(--accent);
   color: #181818;
@@ -837,17 +850,3 @@ footer button {
     width: 30px;
   }
 }
-
-/* Shared centered dialog presentation. */
-.workbench { --dialog-border: #626262; }
-.workbench[data-theme="light"] { --dialog-border: #a6a6a6; }
-.overlay, .overlay--center { align-items: center; padding: 24px; }
-.palette { padding: 0; background: var(--bg); border: 1px solid var(--dialog-border); border-radius: 5px; max-height: calc(100dvh - 48px); min-height: 0; overflow: auto; }
-.settings-dialog { min-height: 0; max-height: calc(100dvh - 48px); border-radius: 5px; overflow: hidden; background: var(--bg); border: 1px solid var(--dialog-border); }
-.settings-header { border-bottom: 1px solid var(--dialog-border); }
-.settings-actions { background: var(--surface); }
-.dialog-header { padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--dialog-border); }
-.dialog-header h2 { margin: 0; text-transform: none; font-size: 13px; }
-.dialog-content { padding: 20px 16px; overflow: auto; }
-.dialog-content p { margin: 0; }
-.dialog-actions { display: flex; justify-content: flex-end; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--border); }

@@ -1,4 +1,4 @@
-import { createVisualActions } from "../visual/actions";
+﻿import { createVisualActions } from "../visual/actions";
 import { initialVisualEditor } from "../visual/model";
 // Placement store: document slice, UI slice, and the autosave scheduler
 // (2s debounce, promise-chain queue so saves never overlap, trailing save,
@@ -800,6 +800,7 @@ export function createPlacementStore(
       const component = draft.components.find((entry) => entry.id === id);
       if (!component) return;
       Object.assign(component, patch);
+      for(const pcb of draft.visualEditor?.pcbs??[])for(const c of pcb.components??[])if(c.markingId===id){c.reference=component.refdes;c.value=component.value??"";c.partName=component.partNumber??"";}
     });
   }
 
@@ -994,3 +995,4 @@ export function createPlacementStore(
 }
 
 export type PlacementStore = ReturnType<typeof createPlacementStore>;
+

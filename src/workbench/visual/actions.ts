@@ -1,6 +1,7 @@
-import type { VisualEditor, VisualImage, VisualPcb, Warp2 } from "./model";
+﻿import type { VisualEditor, VisualImage, VisualPcb, Warp2 } from "./model";
 import { initialVisualEditor, makeVisualImage, newVisualPcb, resizeLayers } from "./model";
 import type { AssetInfo, CropRect, ProjectDoc } from "../placement/projectDoc";
+import { layerResizePlan, mergeNets } from "./copper";
 
 /** Transform-field patch: `null` deletes the field (reset to identity),
  * `undefined` leaves it untouched, values are validated and default-dropped
@@ -63,18 +64,27 @@ function cleanWarp(warp: Warp2 | null): Warp2 | null | undefined {
 }
 
 export function createVisualActions(doc: () => ProjectDoc | null, mutate: (change: (draft: ProjectDoc) => void) => void) {
+  const synchronizeMarkings = (draft:ProjectDoc) => { for(const pcb of draft.visualEditor?.pcbs??[])for(const c of pcb.components??[]){if(!c.markingId)continue;const m=draft.components.find(m=>m.id===c.markingId);if(!m){delete c.markingId;continue;}m.refdes=c.reference;m.value=c.value;m.partNumber=c.partName;} };
   const editor = () => doc()?.visualEditor;
   const activePcb = () => editor()?.pcbs.find((pcb) => pcb.id === editor()?.activePcbId);
-  const edit = (change: (editor: VisualEditor) => void) => mutate((draft) => { draft.visualEditor ??= initialVisualEditor(); change(draft.visualEditor); });
+  const edit = (change: (editor: VisualEditor) => void) => mutate((draft) => { draft.visualEditor ??= initialVisualEditor(); change(draft.visualEditor); synchronizeMarkings(draft); });
   const editPcb = (change: (pcb: VisualPcb) => void) => edit((value) => { const pcb = value.pcbs.find((entry) => entry.id === value.activePcbId); if (pcb) change(pcb); });
   return {
     editor, activePcb,
+    replacePcbs: (values: VisualPcb[]) => edit((state) => { for(const value of values){const index=state.pcbs.findIndex(p=>p.id===value.id);if(index>=0)state.pcbs[index]=value;} }),
+    replacePcb: (value: VisualPcb) => edit((state) => { const index=state.pcbs.findIndex(p=>p.id===value.id); if(index>=0)state.pcbs[index]=value; }),
+    replaceCopper: (pcbId: string, value: Pick<VisualPcb, "nets" | "traces" | "zones" | "vias">) => edit((state) => { const pcb = state.pcbs.find(p => p.id === pcbId); if (pcb) Object.assign(pcb, value); }),
     initialize: () => { if (doc() && !editor()) edit(() => {}); },
     activate: (id: string) => edit((value) => { if (value.pcbs.some((pcb) => pcb.id === id)) value.activePcbId = id; }),
     addPcb: () => edit((value) => { const pcb = newVisualPcb(`PCB ${value.pcbs.length + 1}`); value.pcbs.push(pcb); value.activePcbId = pcb.id; }),
     renamePcb: (id: string, name: string) => { if (name.trim()) edit((value) => { const pcb = value.pcbs.find((entry) => entry.id === id); if (pcb) pcb.name = name.trim(); }); },
     deletePcb: (id: string) => edit((value) => { value.pcbs = value.pcbs.filter((pcb) => pcb.id !== id); if (!value.pcbs.length) value.pcbs.push(newVisualPcb()); if (!value.pcbs.some((pcb) => pcb.id === value.activePcbId)) value.activePcbId = value.pcbs[0].id; }),
-    resizeLayers: (count: number) => editPcb((pcb) => resizeLayers(pcb, count)),
+    resizeLayers: (count: number, destination?: string, survivor?: string) => editPcb((pcb) => {
+      const plan=layerResizePlan(pcb,count,destination); if(!plan)return;
+      if(plan.conflicts.length){if(!survivor||!plan.conflicts.includes(survivor))return;mergeNets(plan.next,plan.conflicts,survivor);}
+      resizeLayers(pcb,count);
+      Object.assign(pcb,{nets:plan.next.nets,traces:plan.next.traces,zones:plan.next.zones,vias:plan.next.vias});
+    }),
     addImage: (pcbId: string, asset: AssetInfo, name: string, width: number, height: number) => mutate((draft) => {
       const pcb = draft.visualEditor?.pcbs.find((entry) => entry.id === pcbId);
       if (!pcb || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return;
@@ -132,3 +142,6 @@ export function createVisualActions(doc: () => ProjectDoc | null, mutate: (chang
     }),
   };
 }
+
+
+

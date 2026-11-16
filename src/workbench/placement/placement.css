@@ -280,7 +280,8 @@
 .pl-inspector-heading { display: flex; align-items: center; gap: 8px; justify-content: space-between; padding: 5px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .pl-inspector-heading h2 { margin: 0 6px; }
 .pl-inspector-heading button { padding: 2px 8px; }
-.pl-inspector-content { min-height: 0; overflow: auto; }
+.pl-inspector-content { flex: 1; min-height: 0; overflow: auto; }
+.pl-inspector-content > .pl-properties { overflow: visible; overscroll-behavior: auto; }
 .pl-inspector-content[hidden] { display: none; }
 .pl-inspector-resizer { position: absolute; z-index: 3; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
 .pl-inspector-resizer:hover, .pl-inspector-resizer:focus-visible { background: var(--focus); opacity: .5; }
@@ -597,8 +598,9 @@ button.pl-combobox-add:hover:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--dialog-border);
 }
 .type-dialog-header h2 {
   margin: 0;
@@ -608,13 +610,17 @@ button.pl-combobox-add:hover:not(:disabled) {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  padding: 16px;
+  background: var(--bg);
+  overflow: auto;
 }
 .type-dialog-footer {
   flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-  padding-top: 8px;
+  padding: 10px 16px;
+  background: var(--surface);
   border-top: 1px solid var(--border);
 }
 
@@ -736,7 +742,7 @@ button.pl-combobox-add:hover:not(:disabled) {
 
 .type-manager {
   width: min(680px, 94vw);
-  max-height: min(620px, 86vh);
+  max-height: min(620px, calc(100dvh - 48px));
 }
 /* The table area scrolls while the header and footer stay fixed. */
 .type-manager .type-dialog-content {

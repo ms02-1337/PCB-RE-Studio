@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod kicad;
 pub mod project;
 
 use tauri::Manager;
@@ -21,6 +22,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::ProjectState::default())
+        .manage(kicad::LibraryState::default())
         .setup(|app| {
             // Any staged assets from a previous session are unreferenced now.
             if let Ok(cache) = app.path().app_cache_dir() {
@@ -48,7 +50,20 @@ pub fn run() {
             commands::asset_import,
             commands::asset_import_clipboard_image,
             commands::asset_read,
-            commands::asset_export
+            commands::asset_export,
+            kicad::commands::kicad_sources,
+            kicad::commands::kicad_add_source,
+            kicad::commands::kicad_remove_source,
+            kicad::commands::kicad_rescan,
+            kicad::commands::kicad_job,
+            kicad::commands::kicad_cancel,
+            kicad::commands::kicad_search,
+            kicad::commands::kicad_footprint,
+            kicad::commands::kicad_symbol,
+            kicad::commands::kicad_definitions,
+            kicad::commands::kicad_save_definition,
+            kicad::commands::kicad_delete_definition,
+            kicad::commands::kicad_export_files
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch PCB RE Studio");

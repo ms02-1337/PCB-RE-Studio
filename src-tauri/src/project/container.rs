@@ -191,7 +191,7 @@ pub fn read_container(path: &Path) -> ProjectResult<(ProjectDoc, Vec<String>)> {
             "project.json exceeds the 16 MiB limit",
         ));
     }
-    let doc: ProjectDoc = serde_json::from_slice(&json).map_err(|error| {
+    let doc: ProjectDoc = crate::kicad::codec::decode(&json).map_err(|error| {
         ProjectError::corrupt_container(format!("project.json is not valid JSON: {error}"))
     })?;
     if doc.schema_version != SCHEMA_VERSION {

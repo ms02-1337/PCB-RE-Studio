@@ -65,11 +65,11 @@ it("shows the tool toolbar with gated enablement and independent PCB tabs", () =
   render(() => <VisualPanel store={store} active />);
   const tools = screen.getByRole("toolbar", { name: "Visual editor tools" });
   const buttons = within(tools).getAllByRole("button");
-  expect(buttons.map((button) => button.textContent)).toEqual(["Add image", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
-  expect(buttons.slice(0, 8).every((button) => button.hasAttribute("disabled"))).toBe(true);
+  expect(buttons.map((button) => button.textContent)).toEqual(["Select", "Place trace", "Place zone", "Place via", "Place component", "Add image", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
+  expect(buttons.slice(5, 13).every((button) => button.hasAttribute("disabled"))).toBe(true);
   expect(within(tools).getByRole("button", { name: "Flip view horizontally" }).hasAttribute("disabled")).toBe(false);
   expect(within(tools).getByRole("button", { name: "Flip view vertically" }).hasAttribute("disabled")).toBe(false);
-  expect(screen.getByRole("complementary", { name: "Selection details" }).textContent).toBe("Selection details›");
+  expect(screen.getByRole("complementary", { name: "Selection details" }).textContent).toContain("Calibrate the PCB");
   fireEvent.click(screen.getByRole("button", { name: "Add visual PCB" }));
   expect(store.visual.editor()!.pcbs).toHaveLength(2); expect(store.mappingTabs()).toHaveLength(1);
 });

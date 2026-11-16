@@ -1,4 +1,5 @@
 import { ActionIcon } from "../ActionIcon";
+import { LibrarySettings } from "../electrical/LibrarySettings";
 import { For, Show, createSignal, onMount } from "solid-js";
 import {
   MAX_AUTOSAVE_DELAY_MS,
@@ -7,7 +8,7 @@ import {
 } from "../placement/store";
 import type { AutosaveSettings } from "../settings";
 
-const sections = ["General", "Autosave"] as const;
+const sections = ["General", "Autosave", "Libraries"] as const;
 type Section = (typeof sections)[number];
 
 export function AutosaveSettingsModal(props: {
@@ -154,6 +155,7 @@ export function AutosaveSettingsModal(props: {
             </For>
           </div>
           <div class="settings-content">
+            <Show when={section() === "Libraries"}><section id="settings-panel-libraries" role="tabpanel" aria-labelledby="settings-tab-libraries"><LibrarySettings /></section></Show>
             <section
               id="settings-panel-general"
               role="tabpanel"
