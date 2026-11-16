@@ -121,7 +121,7 @@ export function AutosaveSettingsModal(props: {
       >
         <header class="settings-header">
           <h2>Settings</h2>
-          <button aria-label="Close settings" onClick={close}>
+          <button class="dialog-close" aria-label="Close settings" onClick={close}>
             ×
           </button>
         </header>

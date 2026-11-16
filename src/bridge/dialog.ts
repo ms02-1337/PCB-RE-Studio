@@ -25,6 +25,17 @@ async function pickOpen(filters: { name: string; extensions: string[] }[]): Prom
   }
 }
 
+/** Directory-only picker (no filters); covered by dialog:allow-open. */
+export async function pickDirectory(): Promise<string | null> {
+  guard();
+  try {
+    const selection = await open({ multiple: false, directory: true });
+    return typeof selection === "string" ? selection : null;
+  } catch {
+    throw new Error("The folder picker could not be opened.");
+  }
+}
+
 async function pickSave(
   defaultName: string,
   filters: { name: string; extensions: string[] }[],

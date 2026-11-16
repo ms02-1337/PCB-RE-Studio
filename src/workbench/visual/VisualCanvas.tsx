@@ -206,9 +206,20 @@ export function VisualCanvas(props: {
   createEffect(() => { if (canvas) canvas.style.cursor = props.tool ? "crosshair" : ""; });
   onMount(() => {
     const resize = () => {
-      width = host.clientWidth; height = host.clientHeight;
+      width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight);
       const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio); redraw();
+      const w = Math.round(width * ratio), h = Math.round(height * ratio);
+      // Assigning canvas.width/height clears the bitmap even when the value is
+      // unchanged, so only reassign on an actual size change.
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      // ResizeObserver fires after layout but BEFORE paint; deferring this
+      // draw to rAF composites a blank frame on every resize tick (the
+      // sidebar-resize flicker), so draw synchronously and drop any pending
+      // frame it would have painted.
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      draw();
     };
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     observer?.observe(host); resize(); onCleanup(() => observer?.disconnect());

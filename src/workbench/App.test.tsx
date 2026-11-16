@@ -189,8 +189,8 @@ it("navigates all six panels with roving keyboard focus", () => {
   const tabs = screen.getAllByRole("tab");
   expect(tabs.map((tab) => tab.textContent)).toEqual([
     "Projects",
-    "Board mapping",
-    "Visual editor",
+    "Board Mapping",
+    "Visual Editor",
     "Schematic",
     "BOM",
     "Nets",

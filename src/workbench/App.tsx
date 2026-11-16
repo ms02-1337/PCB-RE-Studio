@@ -27,8 +27,8 @@ import {
 
 const tabs = [
   "Projects",
-  "Board mapping",
-  "Visual editor",
+  "Board Mapping",
+  "Visual Editor",
   "Schematic",
   "BOM",
   "Nets",
@@ -552,7 +552,7 @@ export default function App(props: { projectName?: string }) {
           <For each={tabs}>
             {(name, index) => (
               <section
-                class={`editor-panel${index() === 0 ? " projects-host" : index() === 1 || index() === 2 ? " placement-host" : ""}`}
+                class={`editor-panel${index() === 0 ? " projects-host" : index() === 1 || index() === 2 ? " placement-host" : " electrical-host"}`}
                 id={`panel-${index()}`}
                 role="tabpanel"
                 aria-labelledby={`tab-${index()}`}

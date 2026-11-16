@@ -333,6 +333,10 @@ main {
 .editor-panel[hidden] {
   display: none;
 }
+/* Schematic/BOM/Nets host: stretch full-bleed like placement-host (the
+   [hidden] override beats the (0,2,0) vs (0,1,1) tie with .editor-panel[hidden]). */
+.editor-panel.electrical-host { display: flex; flex-direction: column; align-items: stretch; min-width: 0; overflow: hidden; padding: 0; }
+.editor-panel.electrical-host[hidden] { display: none; }
 .empty-state {
   text-align: center;
   max-width: 360px;
@@ -709,17 +713,17 @@ footer button {
   color: #181818;
 }
 .autosave-actions .autosave-apply:hover:not(:disabled) {
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent, #ffcd11) 88%, #fff);
+  border-color: #fff;
   color: #181818;
-  filter: brightness(0.92);
 }
 .settings-overlay {
   align-items: center;
   padding: 24px;
 }
 .settings-dialog {
-  width: min(720px, 94vw);
-  height: min(460px, 86vh);
+  width: min(860px, 94vw);
+  height: min(560px, 88vh);
   min-height: 0;
   max-height: calc(100dvh - 48px);
   border-radius: 5px;
@@ -736,9 +740,11 @@ footer button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px 0 16px;
+  padding: 0 6px 0 16px;
   border-bottom: 1px solid var(--dialog-border);
 }
+/* Borderless close affordance that sits close to the dialog edge. */
+.dialog-close { border: 0; background: transparent; padding: 4px 8px; align-self: center; line-height: 1; }
 .settings-header h2 {
   margin: 0;
   font-size: 13px;
@@ -804,6 +810,8 @@ footer button {
   background: var(--bg);
   border: 1px solid var(--border);
 }
+/* Compact action row beside a settings input (Libraries source path). */
+.library-path-actions { display: flex; gap: 6px; }
 .settings-about {
   color: var(--muted);
   font-size: 12px;
@@ -828,6 +836,11 @@ footer button {
   background: var(--accent);
   color: #181818;
   border-color: var(--accent);
+}
+.settings-actions .settings-apply:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #ffcd11) 88%, #fff);
+  border-color: #fff;
+  color: #181818;
 }
 @media (max-width: 700px) {
   .settings-overlay {

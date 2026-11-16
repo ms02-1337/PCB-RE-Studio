@@ -65,11 +65,22 @@ it("shows the tool toolbar with gated enablement and independent PCB tabs", () =
   render(() => <VisualPanel store={store} active />);
   const tools = screen.getByRole("toolbar", { name: "Visual editor tools" });
   const buttons = within(tools).getAllByRole("button");
-  expect(buttons.map((button) => button.textContent)).toEqual(["Select", "Place trace", "Place zone", "Place via", "Place component", "Add image", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
-  expect(buttons.slice(5, 13).every((button) => button.hasAttribute("disabled"))).toBe(true);
+  expect(buttons.map((button) => button.textContent)).toEqual(["Select", "Place trace", "Place zone", "Place via", "Place component", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
+  expect(buttons.slice(5, 12).every((button) => button.hasAttribute("disabled"))).toBe(true);
+  // Add image moved out of the toolbar into the Images heading; browser
+  // preview (isTauri false) keeps it disabled.
+  const addImage = screen.getByRole("button", { name: "Add image" });
+  expect(tools.contains(addImage)).toBe(false);
+  expect(addImage.closest(".ve-heading")).toBeTruthy();
+  expect(addImage.hasAttribute("disabled")).toBe(true);
   expect(within(tools).getByRole("button", { name: "Flip view horizontally" }).hasAttribute("disabled")).toBe(false);
   expect(within(tools).getByRole("button", { name: "Flip view vertically" }).hasAttribute("disabled")).toBe(false);
   expect(screen.getByRole("complementary", { name: "Selection details" }).textContent).toContain("Calibrate the PCB");
+  // Collapsing the Images sidebar hides the heading Add image button.
+  fireEvent.click(screen.getByRole("button", { name: "Hide images" }));
+  expect(screen.queryByRole("button", { name: "Add image" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show images" }));
+  expect(screen.getByRole("button", { name: "Add image" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Add visual PCB" }));
   expect(store.visual.editor()!.pcbs).toHaveLength(2); expect(store.mappingTabs()).toHaveLength(1);
 });
@@ -124,6 +135,21 @@ it("edits independent card settings and leaves details empty", () => {
   fireEvent.input(screen.getByRole("textbox", { name: "Image name" }), { target: { value: "New name" } });
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Image name" }), { key: "Enter" });
   expect(store.visual.activePcb()!.images[0].name).toBe("New name");
+});
+it("switches the shown copper layer from a card's Layer dropdown", () => {
+  store.visual.addImage(store.visual.activePcb()!.id, asset, "Front", 100, 80);
+  render(() => <VisualPanel store={store} active />);
+  const layers = store.visual.activePcb()!.layers;
+  const card = screen.getByRole("combobox", { name: "Layer for Front" }) as HTMLSelectElement;
+  const toolbar = screen.getByRole("combobox", { name: "Shown copper layer" }) as HTMLSelectElement;
+  expect(toolbar.value).toBe(layers[0]);
+  fireEvent.change(card, { target: { value: layers[1] } });
+  expect(store.visual.activePcb()!.images[0].layerId).toBe(layers[1]);
+  expect(toolbar.value).toBe(layers[1]);
+  // Unassigned clears the image's layer but never switches the drawing layer.
+  fireEvent.change(card, { target: { value: "" } });
+  expect(store.visual.activePcb()!.images[0].layerId).toBeUndefined();
+  expect(toolbar.value).toBe(layers[1]);
 });
 it("confirms assigned inner-layer removal and can cancel it", () => {
   store.visual.resizeLayers(8); store.visual.addImage(store.visual.activePcb()!.id, asset, "Inner", 100, 80);

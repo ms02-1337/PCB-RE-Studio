@@ -1,6 +1,8 @@
 import { createSignal, For, onMount, onCleanup, Show } from "solid-js";
 import { isTauri } from "@tauri-apps/api/core";
 import { kicad, type LibrarySource } from "../../bridge/kicad";
+import { pickDirectory } from "../../bridge/dialog";
+import { ActionIcon } from "../ActionIcon";
 
 export function LibrarySettings() {
   const [sources, setSources] = createSignal<LibrarySource[]>([]);
@@ -34,7 +36,22 @@ export function LibrarySettings() {
   }
   return <><h3>KiCad libraries</h3><p>Register an installation, library directory, .pretty folder, .kicad_mod, .kicad_sym or library table. Project snapshots stay unchanged when sources are rescanned.</p>
     <Show when={!isTauri()}><p>Library access requires the desktop app.</p></Show>
-    <label class="settings-field">Source path<input disabled={!isTauri() || busy()} value={path()} onInput={e => setPath(e.currentTarget.value)} /></label>
+    <div class="settings-field">
+      <span>Source path</span>
+      <input aria-label="Source path" disabled={!isTauri() || busy()} value={path()} onInput={e => setPath(e.currentTarget.value)} />
+      <div class="library-path-actions">
+        <button disabled={!isTauri() || busy()} onClick={() => void run(async () => {
+          const dir = await pickDirectory();
+          if (dir) setPath(dir);
+        })}><ActionIcon name="Browse" />Browse…</button>
+        <button disabled={busy()} onClick={() => void run(async () => {
+          if (!navigator.clipboard?.readText) throw new Error("The clipboard is empty or unreadable.");
+          const text = (await navigator.clipboard.readText()).trim();
+          if (text) setPath(text);
+          else throw new Error("The clipboard is empty or unreadable.");
+        })}><ActionIcon name="Paste" />Paste</button>
+      </div>
+    </div>
     <label class="settings-field">Path variables (JSON)<input disabled={busy()} value={variables()} placeholder={'{"KIPRJMOD":"C:/project"}'} onInput={e => setVariables(e.currentTarget.value)} /></label>
     <button disabled={!isTauri() || busy() || !path().trim()} onClick={() => void run(async () => {
       const parsed: unknown = variables().trim() ? JSON.parse(variables()) : {};
