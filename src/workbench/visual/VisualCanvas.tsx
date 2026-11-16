@@ -1,0 +1,298 @@
+import { createSignal, createEffect, onCleanup, onMount } from "solid-js";
+import { assetRead } from "../../bridge/project";
+import { hitVisualImage, type VisualImage } from "./model";
+import type { PlacementStore } from "../placement/store";
+import type { Point } from "../placement/projectDoc";
+import { createVisualToolController, type OverlayView, type ToolIntent, type VisualToolId } from "./toolController";
+import { effectiveVisualTransform, imageAnchor, imageLinear, worldAabb, worldFootprint, worldToSource } from "./transform";
+import { drawVisualOverlays, screenToBase, screenToWorld } from "./overlays";
+
+/** Prompt requests forwarded to the panel (which owns the value modal),
+ * together with a reply seam back into the controller: a positive number
+ * confirms, 0 means "skip this axis", null cancels. */
+export type VisualToolPrompt =
+  | { kind: "calibrate"; spanPx: number }
+  | { kind: "resizeAxis"; axis: "x" | "y"; spanPx: number };
+
+export function VisualCanvas(props: {
+  store: PlacementStore;
+  selected: string | null;
+  select: (id: string | null) => void;
+  active: boolean;
+  opacityDraft: { id: string; value: number } | null;
+  /** Active visual tool owned by the panel; null = idle. */
+  tool: VisualToolId | null;
+  /** View-only whole-canvas mirrors (never written to the document). */
+  flipX: boolean;
+  flipY: boolean;
+  /** Panel callback: the controller went idle after Esc/a commit, so the
+   * toolbar button unpresses. */
+  onToolEnd: () => void;
+  /** Panel callback: open the value modal for a prompt intent. */
+  onPrompt: (prompt: VisualToolPrompt, reply: (value: number | null) => void) => void;
+}) {
+  let canvas!: HTMLCanvasElement;
+  let host!: HTMLDivElement;
+  const controller = createVisualToolController();
+  const cache = new Map<string, ImageBitmap>();
+  const pending = new Set<string>();
+  const failed = new Set<string>();
+  let disposed = false, frame = 0;
+  let width = 1, height = 1;
+  let scale = 1, offsetX = 30, offsetY = 30;
+  let drag: { startWorld: Point; originX: number; originY: number; currentX: number; currentY: number; imageId?: string } | null = null;
+  let identity = "";
+  const [loadError, setLoadError] = createSignal("");
+  const [retry, setRetry] = createSignal(0);
+  const [toast, setToast] = createSignal<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  const images = () => props.store.visual.activePcb()?.images ?? [];
+  const redraw = () => { if (!frame && !disposed) frame = requestAnimationFrame(draw); };
+  const opacity = (image: VisualImage) => props.opacityDraft?.id === image.id ? props.opacityDraft.value : image.opacity;
+  /** Drag-draft positions ride along through the transform seam so previews,
+   * outlines and hit tests track the gesture, not the committed record. */
+  const displayed = (image: VisualImage): VisualImage => drag?.imageId === image.id ? { ...image, x: drag.currentX, y: drag.currentY } : image;
+  const view = (): OverlayView => ({ scale, offsetX, offsetY, flipX: props.flipX, flipY: props.flipY, width, height });
+  const showToast = (message: string) => {
+    setToast(message);
+    if (toastTimer !== undefined) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => setToast(null), 4000);
+  };
+  // transform.ts seams: hit tests and fit bounds run through the pure pipeline
+  // (transform-aware crop containment and the union world AABB).
+  const toSource = (image: VisualImage, x: number, y: number): Point => worldToSource(displayed(image), { x, y });
+  const sceneAabb = (list: VisualImage[]) => worldAabb(list);
+  const reply = (value: number | null) => execute(controller.modalResult(value));
+  /** Executes controller intents: document commits go through the store
+   * (one mutate per commit), toasts stay local, prompts forward to the panel.
+   * When the controller ends up idle while a tool is still requested (Esc,
+   * commit-and-exit, or a rejected begin), the toolbar button unpresses. */
+  const execute = (intents: ToolIntent[]) => {
+    for (const intent of intents) {
+      switch (intent.kind) {
+        case "commitRotation": props.store.visual.updateImageTransform(intent.imageId, intent.patch); break;
+        case "commitCrop": props.store.visual.updateImageTransform(intent.imageId, { crop: intent.crop }); break;
+        case "commitAlign": props.store.visual.updateImageTransform(intent.imageId, intent.patch); break;
+        case "commitResize": props.store.visual.updateImageTransform(intent.imageId, { warp: intent.warp }); break;
+        case "commitCalibrate": props.store.visual.calibratePcb(intent.pxPerMm); break;
+        case "toast": showToast(intent.message); break;
+        case "promptCalibrate": props.onPrompt({ kind: "calibrate", spanPx: intent.spanPx }, reply); break;
+        case "promptResizeAxis": props.onPrompt({ kind: "resizeAxis", axis: intent.axis, spanPx: intent.spanPx }, reply); break;
+      }
+    }
+    if (props.tool && !controller.tool()) props.onToolEnd();
+    redraw();
+  };
+  function draw() {
+    frame = 0;
+    const ctx = canvas?.getContext("2d"); if (!ctx) return;
+    const ratio = window.devicePixelRatio || 1;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    // View flips mirror the whole world pass about the canvas center; the
+    // overlay pass below draws in screen space through worldToScreen instead.
+    if (props.flipX) { ctx.translate(width, 0); ctx.scale(-1, 1); }
+    if (props.flipY) { ctx.translate(0, height); ctx.scale(1, -1); }
+    ctx.translate(offsetX, offsetY); ctx.scale(scale, scale);
+    for (const image of images()) {
+      if (!image.visible || opacity(image) === 0) continue;
+      const bitmap = cache.get(image.assetHash); if (!bitmap) continue;
+      const shown = displayed(image);
+      const anchor = imageAnchor(shown);
+      const linear = imageLinear(shown);
+      const crop = effectiveVisualTransform(shown).crop;
+      ctx.save(); ctx.globalAlpha = opacity(image);
+      ctx.translate(anchor.x, anchor.y);
+      ctx.transform(linear.a, linear.b, linear.c, linear.d, 0, 0);
+      ctx.drawImage(bitmap, crop.x, crop.y, crop.w, crop.h, -crop.w / 2, -crop.h / 2, crop.w, crop.h);
+      ctx.restore();
+      if (props.selected === image.id) {
+        const footprint = worldFootprint(shown);
+        ctx.strokeStyle = "#ffcd11"; ctx.lineWidth = 1.5 / scale;
+        ctx.beginPath(); ctx.moveTo(footprint[0].x, footprint[0].y);
+        for (const corner of footprint.slice(1)) ctx.lineTo(corner.x, corner.y);
+        ctx.closePath(); ctx.stroke();
+      }
+    }
+    ctx.restore();
+    // Screen-space overlays run after the scene so the loupe self-copy reads
+    // fully painted pixels.
+    controller.update(view());
+    drawVisualOverlays(ctx, controller.overlay(), view());
+  }
+  function fit() {
+    const shown = images().filter((image) => image.visible && opacity(image) > 0);
+    if (!shown.length) { scale = 1; offsetX = offsetY = 30; redraw(); return; }
+    const box = sceneAabb(shown);
+    const next = Math.max(0.001, Math.min(100, Math.min((width - 40) / (box.right - box.left), (height - 40) / (box.bottom - box.top))));
+    scale = next;
+    offsetX = (width - (box.right - box.left) * scale) / 2 - box.left * scale;
+    offsetY = (height - (box.bottom - box.top) * scale) / 2 - box.top * scale;
+    redraw();
+  }
+  createEffect(() => {
+    const nextIdentity = `${props.store.projectSession()}:${props.store.visual.activePcb()?.id}`;
+    if (identity !== nextIdentity) { identity = nextIdentity; drag = null; scale = 1; offsetX = offsetY = 30; failed.clear(); setLoadError(""); setToast(null); }
+    const current = images(); void props.selected; void props.opacityDraft; retry();
+    if (!props.active) drag = null;
+    const hashes = new Set(current.map((image) => image.assetHash));
+    for (const [hash, bitmap] of cache) if (!hashes.has(hash)) { bitmap.close(); cache.delete(hash); }
+    for (const hash of hashes) if (!cache.has(hash) && !pending.has(hash) && !failed.has(hash)) {
+      pending.add(hash);
+      void assetRead(hash).then((bytes) => createImageBitmap(new Blob([bytes]))).then((bitmap) => {
+        if (disposed || !images().some((image) => image.assetHash === hash)) bitmap.close();
+        else { cache.set(hash, bitmap); if (images().length === 1) fit(); redraw(); }
+      }).catch(() => { failed.add(hash); setLoadError("Some photographs could not be loaded."); }).finally(() => { pending.delete(hash); });
+    }
+    redraw();
+  });
+  // Tool activation: the panel owns the signal, the canvas owns the
+  // controller. begin() captures the target image at activation; re-selecting
+  // another tool re-begins (the controller replaces its own prior state).
+  createEffect(() => {
+    const tool = props.tool;
+    const running = controller.tool();
+    if (tool && running !== tool) {
+      const image = images().find((entry) => entry.id === props.selected);
+      if (!image) { if (running) execute(controller.cancel()); props.onToolEnd(); return; }
+      execute(controller.begin(tool, image, props.store.visual.activePcb()?.pxPerMm));
+      controller.update(view()); redraw();
+    } else if (!tool && running) {
+      execute(controller.cancel());
+    }
+  });
+  // The captured target image disappeared (deleted/undone): cancel the tool.
+  createEffect(() => {
+    const list = images();
+    const target = controller.targetId();
+    if (target && !list.some((image) => image.id === target)) execute(controller.cancel());
+  });
+  createEffect(() => { void props.flipX; void props.flipY; controller.update(view()); redraw(); });
+  createEffect(() => { if (canvas) canvas.style.cursor = props.tool ? "crosshair" : ""; });
+  onMount(() => {
+    const resize = () => {
+      width = host.clientWidth; height = host.clientHeight;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio); redraw();
+    };
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    observer?.observe(host); resize(); onCleanup(() => observer?.disconnect());
+  });
+  onCleanup(() => { disposed = true; cancelAnimationFrame(frame); if (toastTimer !== undefined) clearTimeout(toastTimer); for (const bitmap of cache.values()) bitmap.close(); });
+  const canvasPoint = (e: { clientX: number; clientY: number }): Point => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+  const end = (commit: boolean) => {
+    if (commit && drag?.imageId) props.store.visual.updateImage(drag.imageId, { x: drag.currentX, y: drag.currentY });
+    drag = null; redraw();
+  };
+  return <div class="ve-canvas" ref={host}>
+    <canvas ref={canvas} tabIndex={0} aria-label="Visual editor photographs" onContextMenu={(e) => e.preventDefault()}
+      onWheel={(e) => {
+        e.preventDefault();
+        // Convert the cursor to world space with the CURRENT mapping (flips
+        // included) first, then solve the offsets so that world point stays
+        // under the cursor at the new scale.
+        const screen = canvasPoint(e);
+        const world = screenToWorld(view(), screen);
+        const next = Math.max(0.001, Math.min(100, scale * Math.exp(-e.deltaY * 0.001)));
+        const base = screenToBase(view(), screen);
+        offsetX = base.x - world.x * next; offsetY = base.y - world.y * next; scale = next;
+        controller.update(view()); redraw();
+      }}
+      onPointerDown={(e) => {
+        if (!props.active || ![0, 1, 2].includes(e.button)) return;
+        e.preventDefault(); canvas.focus(); canvas.setPointerCapture(e.pointerId);
+        const screen = canvasPoint(e);
+        const world = screenToWorld(view(), screen);
+        // Pan entry points: middle button under any tool; without a tool also
+        // right-drag and Alt-drag (legacy behavior). Tool gestures use button 0.
+        if (e.button === 1 || (!controller.tool() && (e.button === 2 || e.altKey))) {
+          drag = { startWorld: world, originX: offsetX, originY: offsetY, currentX: offsetX, currentY: offsetY };
+          return;
+        }
+        if (controller.tool()) { // AC26: tool gestures never select or move images
+          if (e.button !== 0) return; // right button does nothing mid-tool
+          controller.update(view());
+          execute(controller.pointer({ phase: "down", world, screen, shift: e.shiftKey }));
+          return;
+        }
+        const hit = hitVisualImage(images(), world.x, world.y, opacity, toSource);
+        props.select(hit?.id ?? null);
+        if (hit?.locked) return;
+        drag = hit
+          ? { startWorld: world, originX: hit.x, originY: hit.y, currentX: hit.x, currentY: hit.y, imageId: hit.id }
+          : { startWorld: world, originX: offsetX, originY: offsetY, currentX: offsetX, currentY: offsetY };
+      }}
+      onPointerMove={(e) => {
+        const screen = canvasPoint(e);
+        const world = screenToWorld(view(), screen);
+        // An active pan (middle button) outranks the tool: it never started a gesture.
+        if (drag && !drag.imageId) { // pan: keep the grabbed world point under the cursor
+          const base = screenToBase(view(), screen);
+          offsetX = base.x - drag.startWorld.x * scale;
+          offsetY = base.y - drag.startWorld.y * scale;
+          drag.currentX = offsetX; drag.currentY = offsetY;
+          controller.update(view()); redraw();
+          return;
+        }
+        if (controller.tool()) {
+          controller.update(view());
+          if (e.buttons === 0) controller.hover(world);
+          else execute(controller.pointer({ phase: "move", world, screen, shift: e.shiftKey }));
+          redraw();
+          return;
+        }
+        if (!drag) return;
+        if (drag.imageId) { // translation is outermost: world deltas track 1:1
+          drag.currentX = drag.originX + world.x - drag.startWorld.x;
+          drag.currentY = drag.originY + world.y - drag.startWorld.y;
+        }
+        redraw();
+      }}
+      onPointerUp={(e) => {
+        if (drag && !drag.imageId) { // finish a mid-tool pan
+          end(true);
+          if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+          return;
+        }
+        if (controller.tool()) {
+          const screen = canvasPoint(e);
+          controller.update(view());
+          execute(controller.pointer({ phase: "up", world: screenToWorld(view(), screen), screen, shift: e.shiftKey }));
+          if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+          return;
+        }
+        end(true);
+        if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      }}
+      onPointerCancel={(e) => {
+        if (drag && !drag.imageId) { end(false); return; } // abort a mid-tool pan
+        if (controller.tool()) { // no cancel gesture in the contract: end it
+          const screen = canvasPoint(e);
+          controller.update(view());
+          execute(controller.pointer({ phase: "up", world: screenToWorld(view(), screen), screen, shift: false }));
+          return;
+        }
+        end(false);
+      }}
+      onLostPointerCapture={() => { if (!controller.tool() || (drag && !drag.imageId)) end(false); }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          if (controller.tool()) { e.preventDefault(); execute(controller.cancel()); return; }
+          end(false); props.select(null);
+        }
+        if (e.key === "0") fit();
+        if (e.key === "1") { scale = 1; redraw(); }
+        if (controller.tool()) return; // arrow nudging yields to the tool
+        const delta = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, number[]>)[e.key];
+        const image = images().find((i) => i.id === props.selected);
+        if (delta && image) { e.preventDefault(); props.store.visual.updateImage(image.id, { x: image.x + delta[0] * (e.shiftKey ? 10 : 1), y: image.y + delta[1] * (e.shiftKey ? 10 : 1) }); }
+      }} />
+    <div class="ve-view-controls"><button onClick={fit}>Fit</button><button onClick={() => { scale = 1; redraw(); }}>100%</button></div>
+    {toast() && <div class="ve-toast" role="status" aria-live="polite">{toast()}</div>}
+    {loadError() && <div class="ve-load-error" role="alert">{loadError()} <button onClick={() => { failed.clear(); setLoadError(""); setRetry(retry() + 1); }}>Retry</button></div>}
+    {!images().length && <div class="ve-canvas-empty">Add photographs to compare PCB layers.</div>}
+  </div>;
+}

@@ -1,0 +1,795 @@
+/* Component placement tab. Uses theme tokens only. */
+
+.editor-panel.placement-host {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+}
+/* Outranks theme.css `.editor-panel[hidden]` (0,2,0 vs our display rule's
+   0,2,0 tie, which would otherwise win on import order) so the placement
+   panel stays hidden under the other workspace tabs. */
+.editor-panel.placement-host[hidden] {
+  display: none;
+}
+
+.placement-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header row: lifecycle + add/export/types + new-component type picker +
+   project name and inline save status. */
+.pl-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.pl-actions button,
+.pl-boardbar button {
+  padding: 3px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pl-project-name {
+  margin-left: auto;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 30%;
+}
+.pl-save-state {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+/* Body: vertical icon toolbar at the left edge + canvas/properties split. */
+.pl-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.pl-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.pl-tool-btn {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.pl-tool-btn[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--indicator);
+}
+.pl-tool-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.pl-zoom-label {
+  font-size: 11px;
+  min-width: 34px;
+  padding: 3px 0;
+}
+.pl-toolbar-sep {
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+  margin: 0 6px;
+}
+.pl-toolbar .pl-toolbar-sep {
+  width: auto;
+  height: 1px;
+  margin: 4px 2px;
+}
+.pl-boardbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.pl-board-chip {
+  display: inline-flex;
+  align-items: stretch;
+}
+/* Single-line tab: the name only (no image-count subtitle). */
+.pl-board-tab {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.2;
+}
+.pl-board-delete {
+  color: var(--muted);
+  padding: 0 6px;
+}
+.pl-board-delete:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--raised);
+}
+.pl-board-add {
+  white-space: nowrap;
+}
+.pl-board-rename {
+  max-width: 130px;
+}
+.pl-panel-error {
+  margin: 0;
+  padding: 4px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.pl-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.canvas-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+.canvas-tooltip {
+  position: fixed;
+  z-index: 15;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px var(--shadow);
+  font-size: 12px;
+  max-width: 210px;
+}
+.canvas-tooltip .tip-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.canvas-tooltip .tip-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+.canvas-tooltip .tip-marking,
+.canvas-tooltip .tip-locked {
+  color: var(--muted);
+}
+.canvas-readout {
+  position: fixed;
+  z-index: 15;
+  pointer-events: none;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 21;
+  min-width: 190px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px var(--shadow);
+}
+.ctx-menu button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.ctx-menu button:hover:not(:disabled) {
+  background: var(--accent);
+  color: #181818;
+}
+.ctx-shortcut {
+  color: var(--muted);
+  font-size: 11px;
+}
+.pl-properties {
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  resize: none;
+  overflow: auto;
+  padding: 10px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+.pl-component-identification, .pl-component-identification label { display: flex; flex-direction: column; width: 100%; gap: 6px; }
+.pl-component-identification .pl-refdes { width: 100%; max-width: none; box-sizing: border-box; }
+.pl-form .pl-type-field { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.pl-form .pl-combobox { flex: 1; width: 100%; min-width: 0; }
+.pl-component-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pl-component-actions button { flex: 1 1 calc(50% - 8px); }
+.pl-properties textarea { min-height: 34px; width: 100%; }
+.pl-file-row > button:first-of-type { margin-left: auto; }
+.pl-file-actions { display: flex; gap: 8px; width: 100%; }
+.pl-file-actions button { flex: 1 1 0; min-width: 0; white-space: normal; }
+.pl-image img { display: block; width: auto; max-width: 100%; height: auto; }
+.pl-inspector { position: relative; display: flex; flex-direction: column; flex: 0 1 auto; min-width: 220px; max-width: calc(100% - 160px); background: var(--surface); border-left: 1px solid var(--border); }
+.pl-inspector.is-collapsed { flex: 0 0 34px; min-width: 34px; }
+.pl-inspector-heading { display: flex; align-items: center; gap: 8px; justify-content: space-between; padding: 5px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.pl-inspector-heading h2 { margin: 0 6px; }
+.pl-inspector-heading button { padding: 2px 8px; }
+.pl-inspector-content { min-height: 0; overflow: auto; }
+.pl-inspector-content[hidden] { display: none; }
+.pl-inspector-resizer { position: absolute; z-index: 3; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.pl-inspector-resizer:hover, .pl-inspector-resizer:focus-visible { background: var(--focus); opacity: .5; }
+.pl-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pl-empty h2 {
+  margin: 0;
+}
+.pl-empty-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pl-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pl-form-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pl-refdes {
+  font-weight: 600;
+  max-width: 130px;
+  padding: 4px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.pl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.pl-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+.pl-form fieldset {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pl-form legend {
+  padding: 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--muted);
+}
+.pl-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pl-form label > span {
+  letter-spacing: 0.4px;
+}
+.pl-properties input,
+.pl-properties select,
+.pl-properties textarea,
+.type-manager input,
+.type-manager select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  min-width: 0;
+}
+.pl-properties textarea {
+  resize: vertical;
+}
+.pl-inline-action {
+  align-self: flex-start;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.pl-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.pl-file-row small {
+  color: var(--muted);
+}
+.pl-file-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pl-image {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pl-image img {
+  max-width: 100%;
+  height: auto;
+}
+/* The thumbnail is a plain-looking button that opens the viewer. */
+button.pl-image-open {
+  display: block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+}
+button.pl-image-open img {
+  display: block;
+  border: 1px solid var(--border);
+}
+.pl-image figcaption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pl-image-name {
+  flex: 1;
+  min-width: 0;
+}
+button.pl-image-remove {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button.pl-image-remove .action-icon {
+  margin-right: 0;
+}
+
+/* Component-photo viewer: centered overlay dialog with a zoom/pan stage. */
+.image-viewer {
+  width: min(1100px, 94vw);
+}
+.image-viewer-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: min(68vh, 720px);
+  min-height: 220px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  touch-action: none;
+  user-select: none;
+}
+.image-viewer-stage[data-zoomed="true"] {
+  cursor: grab;
+}
+.image-viewer-stage[data-dragging="true"] {
+  cursor: grabbing;
+}
+.image-viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  pointer-events: none;
+  will-change: transform;
+}
+.image-viewer-hint {
+  margin: 0;
+  padding: 6px 2px 0;
+  font-size: 11px;
+  text-align: center;
+}
+button.image-viewer-close {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button.image-viewer-close .action-icon {
+  margin-right: 0;
+}
+.pl-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+/* Disabled form controls share the button treatment so lock states read. */
+.placement-panel input:disabled,
+.placement-panel select:disabled,
+.placement-panel textarea:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* TypeCombobox: filterable input + "+" create button + dropdown listbox. */
+.pl-type-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pl-form .pl-type-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+.pl-combobox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.pl-combobox input[role="combobox"] {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 3px 6px;
+  min-width: 0;
+  width: 132px;
+}
+.pl-form .pl-combobox input[role="combobox"] { flex: 1; width: 0; }
+.pl-actions .pl-combobox input[role="combobox"] {
+  width: 118px;
+}
+button.pl-combobox-add {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+}
+button.pl-combobox-add:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--raised);
+}
+.pl-listbox {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 18;
+  min-width: 190px;
+  max-height: 264px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px var(--shadow);
+  scrollbar-width: thin;
+}
+.pl-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pl-option small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.pl-option[data-active="true"] {
+  background: var(--accent);
+  color: #181818;
+}
+.pl-option[data-active="true"] small {
+  color: inherit;
+}
+.pl-option[aria-selected="true"] .pl-option-name {
+  font-weight: 600;
+}
+.pl-option-empty {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Type modals (overlay/palette pattern; focus trap in the components).
+   Shared scaffolding: bordered title header, scrolling content, separated
+   footer actions. */
+.type-dialog-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.type-dialog-header h2 {
+  margin: 0;
+}
+.type-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.type-dialog-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.type-create {
+  width: min(430px, 92vw);
+}
+.type-create label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.type-create input {
+  padding: 4px 6px;
+  margin-bottom: 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.pl-type-helper {
+  margin: 0;
+  font-size: 11px;
+}
+
+/* Pending-crop chips floating over the canvas + inspector apply/cancel. */
+.pl-crop-chips {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px var(--shadow);
+}
+.pl-crop-chips button,
+.pl-file-row .pl-crop-apply,
+.pl-file-row .pl-crop-cancel {
+  padding: 3px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pl-crop-apply {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #181818;
+}
+.pl-crop-apply:hover:not(:disabled) {
+  background: var(--accent);
+  color: #181818;
+  filter: brightness(0.92);
+}
+.pl-crop-cancel:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+/* Board-picture inspector (transform controls for the selected picture).
+   The title is an inline-renaming input with h2-like visual weight. */
+.pl-board-title {
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 210px;
+  padding: 2px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-transform-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pl-transform-row button {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pl-transform-row button .action-icon {
+  margin-right: 0;
+}
+.pl-rotation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pl-rotation-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pl-rotation-controls button {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+}
+.pl-rotation-value {
+  min-width: 46px;
+  text-align: center;
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.type-manager {
+  width: min(680px, 94vw);
+  max-height: min(620px, 86vh);
+}
+/* The table area scrolls while the header and footer stay fixed. */
+.type-manager .type-dialog-content {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+.type-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.type-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.type-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.type-table td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.type-name {
+  text-align: left;
+}
+.type-rename {
+  width: 120px;
+}
+/* Separator between the type table and the add form. */
+.type-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.type-add label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.type-add input[type="text"] {
+  width: 110px;
+}

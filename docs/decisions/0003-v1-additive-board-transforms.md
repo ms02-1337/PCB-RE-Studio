@@ -1,0 +1,11 @@
+# ADR 0003: additive v1 board transforms and description
+
+Status: accepted, 2026-11-15.
+
+Board pictures are photographed at arbitrary orientation and framing, so they need crop (image-pixel rect), rotation (0/90/180/270 clockwise), flipH/flipV, scale percent, and a picture lock; projects also need a free-text description. All were added WITHOUT bumping schemaVersion from 1.
+
+Every new field is optional with serde defaults on both sides (`#[serde(default…)]` in src-tauri/src/project/schema.rs, optional fields in src/workbench/placement/projectDoc.ts), so files written before the change load unchanged with identity transforms, and old readers that ignore unknown fields still read new files. Rust validation owns the invariants: rotation limited to the four quarter turns, scale within 10–800, crop non-empty and inside the original image bounds, description at most 4000 characters; the UI clamps before committing. Component shapes stay in ORIGINAL image pixels: the transform is a pure rendering concern applied at render, hit-test, and export time through the fixed pipeline crop→rotation→flip→scale, with an exact algebraic inverse for pointer mapping (src/workbench/placement/boardTransform.ts). Board width/height keep the original image dimensions and are never rewritten by a transform; cropped-away components stay in the document and return when the crop widens.
+
+Considered and rejected: bumping to schemaVersion 2 — additive optional fields change the interpretation of no existing v1 field, so a bump would force migration code and lock out v1 readers for zero semantic gain (a genuinely breaking change still bumps, per ADR 0002); mutating component coordinates when a transform is applied — reversible display concerns would permanently rewrite user markings, accumulate rounding error, and make crop destructive, breaking non-destructive editing and crop recovery; storing display-space coordinates — the same loss of reversibility plus ambiguous back-mapping when a transform is later edited.
+
+Consequences: readers must tolerate unknown JSON fields (serde does by default; the TS types mark them optional), and "displayed dimensions" are always derived (cropped size, swapped on quarter turns, × scale/100) rather than stored.
