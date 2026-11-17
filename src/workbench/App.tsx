@@ -1,4 +1,6 @@
 import { SchematicPanel } from "./electrical/SchematicPanel";
+import { IssuesBrowser } from "./IssuesBrowser";
+import type { IssueReveal } from "./issues";
 import { BomPanel } from "./electrical/BomPanel";
 import { VisualPanel } from "./visual/VisualPanel";
 import { NetsPanel } from "./visual/NetsPanel";
@@ -130,6 +132,7 @@ export default function App(props: { projectName?: string }) {
   let settingsInvoker: HTMLElement | null = null;
   let aboutInvoker: HTMLElement | null = null;
   const placement = createPlacementStore();
+  const [issueReveal, setIssueReveal] = createSignal<IssueReveal | null>(null);
   const native = hasNativeWindow();
   const tabButtons: HTMLButtonElement[] = [];
   const hasProject = () => Boolean(props.projectName || placement.doc());
@@ -572,6 +575,12 @@ export default function App(props: { projectName?: string }) {
             }}
           </For>
         </div>
+        <IssuesBrowser store={placement} onReveal={request => {
+          if (request.session !== placement.projectSession()) return;
+          placement.visual.activate(request.issue.pcbId);
+          setActiveTab(2);
+          setIssueReveal(request);
+        }} />
         <SaveBadge store={placement} />
       </div>
       <div class="workspace">
@@ -649,6 +658,7 @@ export default function App(props: { projectName?: string }) {
                           }
                         >
                           <VisualPanel
+                            issueReveal={issueReveal()}
                             store={placement}
                             active={activeTab() === 2}
                           />

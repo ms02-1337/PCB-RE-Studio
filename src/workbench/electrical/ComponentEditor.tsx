@@ -1,3 +1,4 @@
+import { collectPcbIssues } from "../issues";
 import { electricalMembers } from "./actions";
 import { createSignal, createEffect, createMemo, onCleanup, For, Show } from "solid-js";
 import type { PlacementStore } from "../placement/store";
@@ -75,21 +76,7 @@ export function createComponentEditor(
   const current = () => pcb()?.components?.find((c) => c.id === selected());
   /** Derived overlap notification: recomputed from committed placements, so
    * it never touches the document and vanishes as soon as pairs separate. */
-  const overlaps = createMemo(() =>
-    pcb() ? componentProximities(pcb()!.components ?? [], pcb()?.pxPerMm ?? 1) : [],
-  );
-  const overlapNotice = () => {
-    const list = overlaps();
-    if (!list.length) return "";
-    const unit = pcb()?.pxPerMm ? "mm" : "px";
-    return list
-      .map((o) =>
-        o.overlapping
-          ? `${o.a.reference} overlaps ${o.b.reference}`
-          : `${o.a.reference} near ${o.b.reference} (${Math.round(o.gapMm * 100) / 100} ${unit})`,
-      )
-      .join("; ");
-  };
+  const persistentIssues = createMemo(() => pcb() ? collectPcbIssues(pcb()!) : []);
   createEffect(() => {
     const key = store.projectSession() + ":" + pcb()?.id;
     if (key !== session) {
@@ -602,25 +589,11 @@ export function createComponentEditor(
       });
 
       const componentIssues = () => {
-        const issues: string[] = [];
-        const err = error();
-        if (err) issues.push(err);
-        const oNotice = overlapNotice();
-        if (oNotice) {
-          for (const item of oNotice.split("; ")) {
-            if (item.trim()) issues.push(item.trim());
-          }
-        }
-        const comp = current();
-        if (comp) {
-          for (const d of comp.definition.footprint.diagnostics ?? []) {
-            issues.push(`Footprint: ${d}`);
-          }
-          for (const d of comp.definition.symbol?.diagnostics ?? []) {
-            issues.push(`Symbol: ${d}`);
-          }
-        }
-        return issues;
+        const c = current();
+        return [
+          ...(error() ? [error()] : []),
+          ...persistentIssues().filter(i => i.category === "Component issues" && (i.severity === "Warning" || i.target?.componentIds?.includes(c?.id ?? ""))).map(i => i.message),
+        ];
       };
 
       return (

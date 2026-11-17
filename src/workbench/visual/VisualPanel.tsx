@@ -1,3 +1,4 @@
+import type { IssueReveal } from "../issues";
 import { createComponentEditor } from "../electrical/ComponentEditor";
 import {
   createEffect,
@@ -59,7 +60,7 @@ const TRANSFORM_TOOLS = new Set<VisualToolId>([
   "deskew",
 ]);
 
-export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
+export function VisualPanel(props: { store: PlacementStore; active: boolean; issueReveal?: IssueReveal | null }) {
   const visual = props.store.visual;
   const imagesById = createMemo(
     () =>
@@ -87,6 +88,29 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
     () => setCopperFrame((n) => n + 1),
     copper.selectLayer,
   );
+  let revealToken = 0;
+  createEffect(() => {
+    const request = props.issueReveal;
+    if (!props.active || !request || request.token === revealToken || request.session !== props.store.projectSession() || request.issue.pcbId !== visual.activePcb()?.id) return;
+    revealToken = request.token;
+    queueMicrotask(() => {
+      if (request !== props.issueReveal || request.session !== props.store.projectSession() || !props.active) return;
+      const target = request.issue.target;
+      if (!target) return;
+      setActiveTool(null); setPrompt(null); components.cancel(); copper.key("Escape");
+      setCancelGeneration(n => n + 1);
+      setSelected(null);
+      copper.selectLayer(target.layerId);
+      copper.setSelected(target.traceId ?? null);
+      components.setSelected(target.componentIds?.[0] ?? "");
+      setIssueHighlight(request);
+    });
+  });
+  const [issueHighlight, setIssueHighlight] = createSignal<IssueReveal | null>(null);
+  createEffect(() => {
+    const request = issueHighlight(), target = request?.issue.target;
+    if (request && target && (request.session !== props.store.projectSession() || request.issue.pcbId !== visual.activePcb()?.id || target.layerId !== copper.layer() || (target.traceId ? copper.selected() !== target.traceId : components.selected() !== target.componentIds?.[0]))) setIssueHighlight(null);
+  });
   const [flipX, setFlipX] = createSignal(false),
     [flipY, setFlipY] = createSignal(false);
   const [prompt, setPrompt] = createSignal<{
@@ -759,6 +783,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean }) {
         </aside>
         <Show when={leftOpen()}>{separator("left")}</Show>
         <VisualCanvas
+          issueHighlight={issueHighlight()}
           cancelGeneration={cancelGeneration()}
           copper={copper}
           components={components}

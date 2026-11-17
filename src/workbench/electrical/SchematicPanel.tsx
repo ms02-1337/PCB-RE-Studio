@@ -1,3 +1,4 @@
+import { collectPcbIssues } from "../issues";
 import {
   createEffect,
   createMemo,
@@ -10,7 +11,7 @@ import type { KGraphic, KPin } from "../../bridge/kicad";
 import type { PlacementStore } from "../placement/store";
 import type { Point } from "../placement/projectDoc";
 import { visualId, type VisualPcb } from "../visual/model";
-import { newNet, project, distance, ncContacts } from "../visual/copper";
+import { newNet, project, distance } from "../visual/copper";
 import type {
   ElectricalComponent,
   SchematicDocument,
@@ -991,32 +992,10 @@ export function SchematicPanel(props: {
         .map((p, i) => ({ netId, a: representatives[i], b: p }));
     });
   });
-  const diagnostics = () => [
-    ...ncContacts(pcb() ?? { id: "", name: "", layers: [], images: [] }).map(
-      (id) => `${id}: NC copper contact`,
-    ),
-    ...components().flatMap((c) =>
-      [
-        !c.definition.symbol
-          ? `${c.reference}: generic symbol needs identification`
-          : "",
-        c.definition.symbol?.units.some((u) =>
-          u.pins.some(
-            (pin) => !Object.values(c.definition.pinMap).includes(pin.number),
-          ),
-        )
-          ? `${c.reference}: symbol pins remain unmapped to PCB pads`
-          : "",
-        ...c.terminals.flatMap((t) => [
-          !c.definition.pinMap[t.number] && c.definition.symbol
-            ? `${c.reference}.${t.number}: unmapped terminal`
-            : "",
-          !t.netId && !t.nc ? `${c.reference}.${t.number}: unassigned` : "",
-          t.netId && t.nc ? `${c.reference}.${t.number}: NC/net conflict` : "",
-        ]),
-      ].filter(Boolean),
-    ),
-  ];
+  const diagnostics = createMemo(() => {
+    const p = pcb();
+    return p ? collectPcbIssues(p).filter(i => i.category === "Unfinished work" || i.category === "Electrical conflicts").map(i => i.message) : [];
+  });
   const selectedComponent = () =>
     components().find(
       (c) =>

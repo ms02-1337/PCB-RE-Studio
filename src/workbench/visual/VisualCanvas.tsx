@@ -1,3 +1,4 @@
+import type { IssueReveal } from "../issues";
 import type { createComponentEditor } from "../electrical/ComponentEditor";
 import { Show, on, createSignal, createEffect, onCleanup, onMount } from "solid-js";
 import { assetRead } from "../../bridge/project";
@@ -46,6 +47,7 @@ export type VisualToolPrompt =
   | { kind: "resizeAxis"; axis: "x" | "y"; spanPx: number };
 
 export function VisualCanvas(props: {
+  issueHighlight?: IssueReveal | null;
   copper?: CopperEditor;
   copperFrame?: number;
   components?: ReturnType<typeof createComponentEditor>;
@@ -505,6 +507,14 @@ export function VisualCanvas(props: {
       : undefined;
     props.components?.draw(ctx, scale, multiOffset, selectedComponents);
     props.copper?.draw(ctx, scale, multiOffset, selectedCopper);
+    const issue = props.issueHighlight;
+    const target = issue?.issue.target;
+    if (target && issue?.session === props.store.projectSession() && issue.issue.pcbId === props.store.visual.activePcb()?.id && target.layerId === props.copper?.layer() && (target.traceId ? props.copper?.selected() === target.traceId : props.components?.selected() === target.componentIds?.[0])) {
+      ctx.save(); ctx.strokeStyle = "#ffcd11"; ctx.lineWidth = 3 / scale;
+      if (target.point) { ctx.beginPath(); ctx.arc(target.point.x,target.point.y,12/scale,0,Math.PI*2); ctx.stroke(); }
+      else { const b=target.bounds; ctx.strokeRect(b.left-4/scale,b.top-4/scale,b.right-b.left+8/scale,b.bottom-b.top+8/scale); }
+      ctx.restore();
+    }
     if (boxSelect) {
       const minX = Math.min(boxSelect.startWorld.x, boxSelect.currentWorld.x);
       const maxX = Math.max(boxSelect.startWorld.x, boxSelect.currentWorld.x);
@@ -551,9 +561,23 @@ export function VisualCanvas(props: {
     offsetY = (height - (box.bottom - box.top) * scale) / 2 - box.top * scale;
     redraw();
   }
+  let handledIssueToken = 0;
+  function applyIssueFocus() {
+    const request = props.issueHighlight;
+    if (!props.active || !request || request.token === handledIssueToken || request.session !== props.store.projectSession() || request.issue.pcbId !== props.store.visual.activePcb()?.id || !request.issue.target || width <= 1 || height <= 1) return;
+    handledIssueToken = request.token;
+    const b = request.issue.target.bounds;
+    const w = Math.max(1,b.right-b.left), h = Math.max(1,b.bottom-b.top);
+    scale = Math.max(0.001,Math.min(8,Math.max(1,width-80)/w,Math.max(1,height-80)/h));
+    offsetX = width/2-(b.left+b.right)/2*scale;
+    offsetY = height/2-(b.top+b.bottom)/2*scale;
+    canvas?.focus(); redraw();
+  }
+  createEffect(applyIssueFocus);
   createEffect(() => {
     const nextIdentity = `${props.store.projectSession()}:${props.store.visual.activePcb()?.id}`;
     if (identity !== nextIdentity) {
+      handledIssueToken = 0;
       identity = nextIdentity;
       drag = null;
       boxSelect = null;
@@ -598,7 +622,7 @@ export function VisualCanvas(props: {
               bitmap.close();
             else {
               cache.set(hash, bitmap);
-              if (images().length === 1) fit();
+              if (images().length === 1 && !handledIssueToken) fit();
               redraw();
             }
           })
@@ -693,6 +717,7 @@ export function VisualCanvas(props: {
         return;
       width = nextWidth;
       height = nextHeight;
+      applyIssueFocus();
       if (canvas.width !== w) canvas.width = w;
       if (canvas.height !== h) canvas.height = h;
       // ResizeObserver fires after layout but BEFORE paint; deferring this

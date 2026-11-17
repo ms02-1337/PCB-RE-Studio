@@ -1,5 +1,7 @@
 # Architecture
 
+Project diagnostics are derived in the pure frontend collector `src/workbench/issues.ts`, using existing component proximity, physical trace-end and NC-contact algorithms. Typed issue targets carry PCB/layer/object identities and world bounds or exact pad/endpoint locations. The project-wide browser aggregates committed PCB data, while reveal requests are session-scoped and transient; neither issues nor highlights extend the project schema or native IPC. Canvas reveals cancel drafts, frame the location and use constant-screen-size markers independently of photograph loading and view flips.
+
 A local desktop application: SolidJS + TypeScript + Vite owns interaction and presentation; Rust owns native access and expensive domain operations. Keep domain algorithms independent of Tauri handlers. The workbench is in src/workbench; shared UI can grow under src/ui when reused; IPC lives in src/bridge; native integration is in src-tauri.
 
 ## Boundary contract
