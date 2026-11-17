@@ -652,7 +652,140 @@
 .palette.component-manager{width:calc(100vw - 48px)}
 .component-manager .component-browser-controls input{width:220px;max-width:260px;height:26px;min-height:26px;padding:2px 8px;margin:0;box-sizing:border-box;font-size:12px;line-height:normal;border-radius:3px}
 .component-browser-controls button,.component-browser-controls select{height:26px;min-height:26px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;border-radius:3px}
-.component-start{padding:28px;max-width:700px;margin:auto}.component-start button{margin:8px 12px 8px 0}
+.component-start {
+  padding: 32px 24px;
+  max-width: 640px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  box-sizing: border-box;
+}
+.component-start-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.component-start-hero h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.component-start-desc {
+  font-size: 13px;
+  color: var(--muted, #aaa);
+  margin: 0 0 20px;
+  max-width: 480px;
+  line-height: 1.5;
+}
+.component-start-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.component-start-btn {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface, #1e1e1e);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+.component-start-btn:hover {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--focus, #ffcd11);
+}
+.component-start-btn--primary {
+  background: var(--focus, #ffcd11);
+  border-color: var(--focus, #ffcd11);
+  color: #111;
+  font-weight: 600;
+}
+.component-start-btn--primary:hover {
+  filter: brightness(1.12);
+}
+
+/* 3-step component architecture guide */
+.component-start-guide {
+  margin-top: 36px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.component-guide-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #888);
+  margin-bottom: 16px;
+}
+.component-guide-cards {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.component-guide-card {
+  flex: 1 1 140px;
+  max-width: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 12px 10px;
+  background: var(--surface, #1e1e1e);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.component-guide-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 205, 17, 0.15);
+  border: 1px solid var(--focus, #ffcd11);
+  color: var(--focus, #ffcd11);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.component-guide-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.component-guide-info {
+  font-size: 11px;
+  color: var(--muted, #aaa);
+  line-height: 1.3;
+}
+.component-guide-connector {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted, #666);
+  user-select: none;
+  flex-shrink: 0;
+}
 .component-manager nav.component-steps {
   display: flex;
   flex-direction: row;
@@ -697,6 +830,14 @@
   flex: none;
   height: auto;
   overflow: visible;
+}
+.component-manager .component-manager-body > main[data-step="start"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 100%;
 }
 .component-manager .library-results,
 .component-manager .component-pin-table {
@@ -764,11 +905,13 @@
 .component-manager main[data-step="saved"] .component-browser{flex:1 1 auto;max-height:none}
 .component-preview-stage{display:flex;flex-direction:column;flex:1 1 0;min-height:0}
 .component-manager .component-previews{flex:1 1 0;min-height:180px;gap:12px;margin-top:10px}
-.component-manager .component-previews>div{display:flex;flex-direction:column;min-height:0}
-.component-manager .component-previews h3{flex:0 0 auto;font-size:13px;margin:0 0 8px}
+.component-preview-pane{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);padding:10px;box-sizing:border-box}
+.component-preview-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex:0 0 auto}
+.component-preview-header h3{margin:0;font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .component-preview-surface{position:relative;flex:1 1 0;min-height:0;overflow:hidden;background:var(--bg)}
 .component-manager .component-preview-surface canvas{position:absolute;inset:0;width:100%;height:100%;max-width:none;aspect-ratio:auto;object-fit:fill;touch-action:none}
-.component-preview-fit{position:absolute;right:6px;top:6px;z-index:1;padding:3px 8px}
+.component-preview-fit{position:static;padding:2px 8px;font-size:11px;font-weight:500;height:24px;min-height:24px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:3px;cursor:pointer;flex-shrink:0}
+.component-preview-fit:hover{background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
 .component-manager .component-preview-stage>h3{flex:0 0 auto;margin:10px 0 6px;font-size:13px}
 .component-manager .component-pin-table{flex:0 1 26%;min-height:75px;max-height:200px;overflow:auto;border:1px solid var(--border);background:var(--bg)}
 .component-pin-table table {

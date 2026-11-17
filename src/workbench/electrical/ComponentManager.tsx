@@ -209,7 +209,7 @@ export function ComponentManager(props: {
   createEffect(()=>{step();configuration();finishSplit(true);});
   onCleanup(()=>finishSplit(true));
   const [selectedPad, setSelectedPad] = createSignal("");
-  const Preview = (p: { symbol?: boolean }) => {
+  const Preview = (p: { symbol?: boolean; title?: string }) => {
     const [zoom,setZoom]=createSignal(1), [pan,setPan]=createSignal({x:0,y:0}), [size,setSize]=createSignal({width:400,height:260});
     let canvas!: HTMLCanvasElement, surface!: HTMLDivElement;
     let dragging: { id:number; x:number; y:number; pan:{x:number;y:number} } | undefined;
@@ -289,17 +289,24 @@ export function ComponentManager(props: {
     const local=(e:{clientX:number;clientY:number})=>{const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)*size().width/Math.max(1,r.width),y:(e.clientY-r.top)*size().height/Math.max(1,r.height)};};
     const end=()=>{if(dragging&&canvas.hasPointerCapture?.(dragging.id))canvas.releasePointerCapture(dragging.id);dragging=undefined;};
     onCleanup(end);
-    return <div ref={surface} class="component-preview-surface">
-      <canvas ref={canvas} aria-label={p.symbol?"Symbol preview":"Footprint preview"}
-        onWheel={e=>{e.preventDefault();const cursor=local(e), world=previewPoint(view(),cursor), next=Math.max(0.1,Math.min(30,zoom()*Math.exp(-e.deltaY*0.001)));setZoom(next);const mapping=view();setPan(current=>({x:current.x+cursor.x-(world.x*mapping.scale+mapping.x),y:current.y+cursor.y-(world.y*mapping.scale+mapping.y)}));}}
-        onPointerDown={e=>{if(e.button!==1)return;e.preventDefault();const cursor=local(e);dragging={id:e.pointerId,x:cursor.x,y:cursor.y,pan:pan()};canvas.setPointerCapture?.(e.pointerId);}}
-        onPointerMove={e=>{if(!dragging || dragging.id!==e.pointerId)return;const cursor=local(e);setPan({x:dragging.pan.x+cursor.x-dragging.x,y:dragging.pan.y+cursor.y-dragging.y});}}
-        onPointerUp={end} onPointerCancel={end} onLostPointerCapture={()=>{dragging=undefined;}}
-        onAuxClick={e=>e.preventDefault()}
-        onClick={e=>{const d=definition();if(!d)return;const point=previewPoint(view(),local(e));if(p.symbol){const pins=d.symbol?.units.filter(u=>(u.unit===1||u.unit===0)&&(u.bodyStyle===1||u.bodyStyle===0)).flatMap(u=>u.pins)??[];const hit=pins.find(pin=>Math.hypot(pin.x-point.x,-pin.y-point.y)<2);if(hit)setSelectedPad(Object.keys(d.pinMap).find(n=>d.pinMap[n]===hit.number)??"");}else{const hit=d.footprint.pads.find(pad=>Math.hypot(pad.x-point.x,pad.y-point.y)<Math.max(pad.width,pad.height));if(hit)setSelectedPad(hit.number);}}}
-      />
-      <button class="component-preview-fit" aria-label={p.symbol?"Fit symbol preview":"Fit footprint preview"} title="Fit preview; wheel to zoom; middle-drag to pan" onClick={reset}>Fit</button>
-    </div>;
+    return (
+      <div class="component-preview-pane">
+        <div class="component-preview-header">
+          <h3>{p.title ?? (p.symbol ? (definition()?.symbol?.name ?? "Generic symbol") : (definition()?.footprint.name ?? "Footprint preview"))}</h3>
+          <button class="component-preview-fit" aria-label={p.symbol?"Fit symbol preview":"Fit footprint preview"} title="Fit preview; wheel to zoom; middle-drag to pan" onClick={reset}>Fit</button>
+        </div>
+        <div ref={surface} class="component-preview-surface">
+          <canvas ref={canvas} aria-label={p.symbol?"Symbol preview":"Footprint preview"}
+            onWheel={e=>{e.preventDefault();const cursor=local(e), world=previewPoint(view(),cursor), next=Math.max(0.1,Math.min(30,zoom()*Math.exp(-e.deltaY*0.001)));setZoom(next);const mapping=view();setPan(current=>({x:current.x+cursor.x-(world.x*mapping.scale+mapping.x),y:current.y+cursor.y-(world.y*mapping.scale+mapping.y)}));}}
+            onPointerDown={e=>{if(e.button!==1)return;e.preventDefault();const cursor=local(e);dragging={id:e.pointerId,x:cursor.x,y:cursor.y,pan:pan()};canvas.setPointerCapture?.(e.pointerId);}}
+            onPointerMove={e=>{if(!dragging || dragging.id!==e.pointerId)return;const cursor=local(e);setPan({x:dragging.pan.x+cursor.x-dragging.x,y:dragging.pan.y+cursor.y-dragging.y});}}
+            onPointerUp={end} onPointerCancel={end} onLostPointerCapture={()=>{dragging=undefined;}}
+            onAuxClick={e=>e.preventDefault()}
+            onClick={e=>{const d=definition();if(!d)return;const point=previewPoint(view(),local(e));if(p.symbol){const pins=d.symbol?.units.filter(u=>(u.unit===1||u.unit===0)&&(u.bodyStyle===1||u.bodyStyle===0)).flatMap(u=>u.pins)??[];const hit=pins.find(pin=>Math.hypot(pin.x-point.x,-pin.y-point.y)<2);if(hit)setSelectedPad(Object.keys(d.pinMap).find(n=>d.pinMap[n]===hit.number)??"");}else{const hit=d.footprint.pads.find(pad=>Math.hypot(pad.x-point.x,pad.y-point.y)<Math.max(pad.width,pad.height));if(hit)setSelectedPad(hit.number);}}}
+          />
+        </div>
+      </div>
+    );
   };
   const [confirmDiscard, setConfirmDiscard] = createSignal(false);
   let keepEditingBtn: HTMLButtonElement | undefined;
@@ -358,7 +365,53 @@ export function ComponentManager(props: {
         <div class="component-manager-body">
           <div hidden={!configuration()} class="component-configuration"><LibrarySettings onChanged={() => { void refresh(); setRevision(n => n + 1); }} /></div>
           <main hidden={configuration()} data-step={step()}>
-            <Show when={step() === "start"}><section class="component-start"><h3>Choose a component</h3><p>Use a saved component, or create one from a footprint and an optional library symbol.</p><button autofocus onClick={() => { setSavedFlow(true); navigate("saved"); }}>Use saved component</button><button onClick={startNew}>Create new component</button></section></Show>
+            <Show when={step() === "start"}>
+              <section class="component-start">
+                <div class="component-start-hero">
+                  <h3>Choose a component</h3>
+                  <p class="component-start-desc">
+                    Use an existing saved component, or define a new one from KiCad libraries.
+                  </p>
+                  <div class="component-start-actions">
+                    <button
+                      autofocus
+                      class="component-start-btn"
+                      onClick={() => { setSavedFlow(true); navigate("saved"); }}
+                    >
+                      Use saved component
+                    </button>
+                    <button
+                      class="component-start-btn component-start-btn--primary"
+                      onClick={startNew}
+                    >
+                      Create new component
+                    </button>
+                  </div>
+                </div>
+                <div class="component-start-guide" aria-label="Component architecture guide">
+                  <div class="component-guide-title">A complete component definition links three parts:</div>
+                  <div class="component-guide-cards">
+                    <div class="component-guide-card">
+                      <div class="component-guide-badge">1</div>
+                      <strong class="component-guide-name">Footprint</strong>
+                      <span class="component-guide-info">Physical pads and board dimensions</span>
+                    </div>
+                    <span class="component-guide-connector" aria-hidden="true">+</span>
+                    <div class="component-guide-card">
+                      <div class="component-guide-badge">2</div>
+                      <strong class="component-guide-name">Symbol</strong>
+                      <span class="component-guide-info">Schematic pinout and symbol graphics</span>
+                    </div>
+                    <span class="component-guide-connector" aria-hidden="true">=</span>
+                    <div class="component-guide-card">
+                      <div class="component-guide-badge">3</div>
+                      <strong class="component-guide-name">Pin Mapping</strong>
+                      <span class="component-guide-info">Connects footprint pads to schematic pins</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </Show>
             <Show when={step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span><div class="component-step-actions">          <Show when={!configuration() && step() !== "start"}><button class="component-step-btn component-step-back" disabled={busy()} onClick={back}>Back</button><button class="component-step-btn component-step-home" disabled={busy()} onClick={goToStart} title="Return to main screen">Main screen</button></Show>
           <Show when={!configuration() && (step() === "footprint" || step() === "symbol")}><button class="component-step-btn component-step-next" disabled={busy() || !definition() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length} onClick={() => navigate(step() === "footprint" ? "symbol" : "review")}>Next</button></Show>
 </div></nav></Show>
@@ -420,15 +473,8 @@ export function ComponentManager(props: {
               {(visible) => (
                 <div class="component-preview-stage" id="component-library-previews" data-visible={visible()}>
                   <div class="component-previews">
-                    <div>
-                      <h3>{definition()?.footprint.name ?? "Footprint preview"}</h3>
-                      <Preview />
-                    </div>
-                    <div>
-                      <h3>{definition()?.symbol?.name ?? "Generic symbol"}</h3>
-                      <Preview symbol />
-
-                    </div>
+                    <Preview title={definition()?.footprint.name ?? "Footprint preview"} />
+                    <Preview symbol title={definition()?.symbol?.name ?? "Generic symbol"} />
                   </div>
                   <Show when={step() === "review" && definition()}>
                   <h3>Pin assignments</h3>

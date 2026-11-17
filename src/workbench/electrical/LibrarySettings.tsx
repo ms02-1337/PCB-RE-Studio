@@ -4,6 +4,16 @@ import { kicad, type LibrarySource } from "../../bridge/kicad";
 import { pickDirectory } from "../../bridge/dialog";
 import { ActionIcon } from "../ActionIcon";
 
+function cleanPath(p: string): string {
+  if (p.startsWith("\\\\?\\UNC\\")) {
+    return "\\\\" + p.slice(8);
+  }
+  if (p.startsWith("\\\\?\\")) {
+    return p.slice(4);
+  }
+  return p;
+}
+
 export function LibrarySettings(props: { onChanged?: () => void } = {}) {
   const [replacing, setReplacing] = createSignal<LibrarySource>();
   const [sources, setSources] = createSignal<LibrarySource[]>([]);
@@ -70,7 +80,7 @@ export function LibrarySettings(props: { onChanged?: () => void } = {}) {
     })}>{replacing() ? "Save and index replacement" : "Add and index source"}</button>
     <Show when={replacing()}><button disabled={busy()} onClick={() => { setReplacing(undefined); setPath(""); }}>Cancel path change</button></Show>
     <div class="library-source-table"><table><thead><tr><th>Source</th><th>Configured path</th><th>Actions</th></tr></thead><tbody>
-    <For each={sources()}>{source => <tr><td><strong>{source.name}</strong>{source.local ? <p>App-managed copies of imported footprint and symbol files.</p> : undefined}<For each={source.diagnostics}>{d => <p>{d}</p>}</For></td><td class="library-source-path">{source.path}</td><td><div class="library-source-actions">{source.local ? <span class="library-local-note">Managed by the app</span> : <button disabled={busy()} onClick={() => { setReplacing(source); setPath(source.path); setVariables(JSON.stringify(source.variables ?? {})); }}>Change path</button>}<button disabled={busy()} onClick={() => void run(() => scan(source.id).then(() => {}))}>Rescan</button>{source.local ? undefined : <button disabled={busy()} onClick={() => void run(async () => { await kicad.removeSource(source.id); await refresh(); props.onChanged?.(); })}>Remove source</button>}</div></td></tr>}</For>
+    <For each={sources()}>{source => <tr><td><strong>{source.name}</strong>{source.local ? <p>App-managed copies of imported footprint and symbol files.</p> : undefined}<For each={source.diagnostics}>{d => <p>{d}</p>}</For></td><td class="library-source-path">{cleanPath(source.path)}</td><td><div class="library-source-actions">{source.local ? <span class="library-local-note">Managed by the app</span> : <button disabled={busy()} onClick={() => { setReplacing(source); setPath(cleanPath(source.path)); setVariables(JSON.stringify(source.variables ?? {})); }}>Change path</button>}<button disabled={busy()} onClick={() => void run(() => scan(source.id).then(() => {}))}>Rescan</button>{source.local ? undefined : <button disabled={busy()} onClick={() => void run(async () => { await kicad.removeSource(source.id); await refresh(); props.onChanged?.(); })}>Remove source</button>}</div></td></tr>}</For>
     </tbody></table></div>
     <p role="status">{status()}</p><button disabled={!job()} onClick={() => { void kicad.cancel(job()).catch(e => { if (alive) setError(String(e)); }); }}>Cancel indexing</button><Show when={error()}><p role="alert">{error()}</p></Show>
   </>;

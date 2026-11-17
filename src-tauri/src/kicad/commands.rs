@@ -1,5 +1,15 @@
 use super::*;
 use tauri::Manager;
+pub fn strip_verbatim_prefix(path: &str) -> String {
+    if let Some(stripped) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{stripped}")
+    } else if let Some(stripped) = path.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
 fn registry<T>(
     app: &tauri::AppHandle,
     change: impl FnOnce(&mut Registry) -> ProjectResult<T>,
@@ -37,7 +47,20 @@ async fn blocking<T: Send + 'static>(
 }
 #[tauri::command]
 pub async fn kicad_sources(app: tauri::AppHandle) -> ProjectResult<Vec<LibrarySource>> {
-    blocking(move || registry(&app, |r| Ok(r.sources.clone()), false)).await
+    blocking(move || {
+        registry(
+            &app,
+            |r| {
+                let mut sources = r.sources.clone();
+                for s in &mut sources {
+                    s.path = strip_verbatim_prefix(&s.path);
+                }
+                Ok(sources)
+            },
+            false,
+        )
+    })
+    .await
 }
 #[tauri::command]
 pub async fn kicad_add_source(
@@ -56,7 +79,7 @@ pub async fn kicad_add_source(
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        let path = path.to_string_lossy().into_owned();
+        let path = strip_verbatim_prefix(&path.to_string_lossy());
         let source = LibrarySource {
             id: parser::hash(&path),
             path,
@@ -408,4 +431,29 @@ pub async fn kicad_export_text(path: String, text: String) -> ProjectResult<()> 
         atomic(&path, text.as_bytes())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_verbatim_prefix() {
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\C:\Program Files\KiCad\9.0"),
+            r"C:\Program Files\KiCad\9.0"
+        );
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share\kicad"),
+            r"\\server\share\kicad"
+        );
+        assert_eq!(
+            strip_verbatim_prefix(r"C:\Program Files\KiCad\9.0"),
+            r"C:\Program Files\KiCad\9.0"
+        );
+        assert_eq!(
+            strip_verbatim_prefix(r"/usr/share/kicad"),
+            r"/usr/share/kicad"
+        );
+    }
 }
