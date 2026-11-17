@@ -23,6 +23,7 @@ import {
 } from "./transform";
 import { drawVisualOverlays, screenToBase, screenToWorld } from "./overlays";
 import type { CopperEditor } from "./CopperEditor";
+import { pruneComponentReferences } from "../electrical/actions";
 
 /** Seam overdraw: each clipped mesh triangle is inflated this many CSS px
  * beyond its vertices (radially from the centroid) so adjacent triangles
@@ -212,9 +213,7 @@ export function VisualCanvas(props: {
           props.store.visual.updateImageTransform(intent.imageId, intent.patch);
           break;
         case "commitCrop":
-          props.store.visual.updateImageTransform(intent.imageId, {
-            crop: intent.crop,
-          });
+          props.store.visual.updateImageTransform(intent.imageId, intent.patch);
           break;
         case "commitAlign":
           props.store.visual.updateImageTransform(intent.imageId, intent.patch);
@@ -315,12 +314,39 @@ export function VisualCanvas(props: {
       }
     }
 
+    // Multi-selection moves commit through the same reconciliation pipeline
+    // as single-element edits: stale pad anchors are dropped, new NC contacts
+    // ask, and distinct nets joined by the new geometry open the merge dialog
+    // instead of silently shorting. Raw replacePcb would skip all of it.
+    const movedCopper = [
+      ...(next.traces ?? []),
+      ...(next.vias ?? []),
+      ...(next.zones ?? []),
+    ].filter((e) => selectedCopper.has(e.id) && !e.locked);
+    const movedComponents = (next.components ?? []).filter(
+      (c) => selectedComponents.has(c.id) && !c.locked,
+    );
+    if (props.copper && (movedCopper.length || movedComponents.length)) {
+      props.copper.commitMoved(
+        next,
+        [
+          ...movedCopper.map((e) => e.id),
+          ...movedComponents.flatMap((c) =>
+            c.terminals.map((t) => c.id + ":" + t.number),
+          ),
+        ],
+      );
+      return;
+    }
     props.store.visual.replacePcb(next);
   };
   const deleteMultiSelection = () => {
     const pcb = props.store.visual.activePcb();
     if (!pcb) return;
     const next = structuredClone(pcb) as VisualPcb;
+    const removedComponents = (next.components ?? [])
+      .filter((c) => selectedComponents.has(c.id) && !c.locked)
+      .map((c) => c.id);
     if (selectedImages.size > 0) {
       next.images = (next.images ?? []).filter(
         (img) => !selectedImages.has(img.id) || img.locked,
@@ -342,6 +368,10 @@ export function VisualCanvas(props: {
         (z) => !selectedCopper.has(z.id) || z.locked,
       );
     }
+    // Delete the removed components' trace pad anchors and schematic
+    // units/labels/wires so the document stays exportable; without this a
+    // multi-delete strands "Schematic references a missing component."
+    pruneComponentReferences(next, removedComponents);
     selectedImages.clear();
     selectedComponents.clear();
     selectedCopper.clear();

@@ -2,7 +2,7 @@ import { it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { createPlacementStore } from "../placement/store";
 import { SEED_TYPES, type ProjectDoc } from "../placement/projectDoc";
-import { BomPanel } from "./BomPanel";
+import { BomPanel, bomCsv, type BomMember } from "./BomPanel";
 import type { ElectricalComponent } from "./model";
 
 let store: ReturnType<typeof createPlacementStore>;
@@ -248,4 +248,49 @@ it("supports keyboard activation, commit on blur, and placeholder for empty valu
   const updatedBtn = screen.getByRole("button", { name: "Part name for row 1" });
   expect(updatedBtn.textContent).toBe("—");
   expect(updatedBtn.querySelector(".bom-editable-placeholder")).toBeTruthy();
+});
+
+it("rejects case-insensitive duplicate and over-long references", () => {
+  render(() => <BomPanel store={store} />);
+
+  fireEvent.click(screen.getByRole("button", { name: /references \/ replace for row 1/i }));
+  const r1Input = screen.getByLabelText("Reference R1");
+
+  // "r2" collides with the existing "R2" case-insensitively
+  fireEvent.change(r1Input, { target: { value: "r2" } });
+  expect(screen.getAllByRole("alert").some((a) => /case insensitive/i.test(a.textContent ?? ""))).toBe(true);
+  expect(store.visual.activePcb()!.components!.find((c) => c.id === "c1")!.reference).toBe("R1");
+
+  // More than 200 characters is rejected
+  fireEvent.change(r1Input, { target: { value: "R" + "9".repeat(200) } });
+  expect(screen.getAllByRole("alert").some((a) => /200/i.test(a.textContent ?? ""))).toBe(true);
+  expect(store.visual.activePcb()!.components!.find((c) => c.id === "c1")!.reference).toBe("R1");
+
+  // A case-only change of a member's own reference is not a self-conflict
+  fireEvent.change(r1Input, { target: { value: "r1" } });
+  expect(store.visual.activePcb()!.components!.find((c) => c.id === "c1")!.reference).toBe("r1");
+});
+
+it("neutralizes spreadsheet formula prefixes in CSV export", () => {
+  const member: BomMember = {
+    pcbId: "pcb-1",
+    pcbName: "Main Board",
+    component: makeComponent("c9", "=cmd", "=1+1"),
+  };
+  member.component.partName = "+5V";
+  const row = [{ key: "k", members: [member] }];
+  // Formula-triggering prefixes get a leading apostrophe inside the quotes
+  const bare = bomCsv(row);
+  expect(bare).toContain("\"'=1+1\"");
+  expect(bare).toContain("\"'+5V\"");
+  expect(bare).toContain("\"'=cmd\"");
+  // With PCB prefixes the reference is mid-field ("Main Board:=cmd") and so
+  // cannot start a formula; it must pass through unmodified.
+  const prefixed = bomCsv(row, true);
+  expect(prefixed).toContain("\"Main Board:=cmd\"");
+  expect(prefixed).toContain("\"'=1+1\"");
+  // No field may START a formula character in either variant
+  for (const csv of [bare, prefixed])
+    for (const field of csv.match(/"([^"]*)"/g) ?? [])
+      expect(/^[=+@]/.test(field.slice(1, -1))).toBe(false);
 });

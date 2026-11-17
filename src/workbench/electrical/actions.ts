@@ -76,6 +76,36 @@ export function electricalMembers(
   }
   return members;
 }
+/** Drop every reference to the removed components: trace pad anchors,
+ * schematic units, anchored labels, and wires anchored to their terminals
+ * (mid-wire `connections` anchors are filtered out). Mirrors the single
+ * component removal flow so multi-selection deletes leave the document
+ * exportable. */
+export function pruneComponentReferences(pcb: VisualPcb, ids: string[]): void {
+  const removed = new Set(ids);
+  if (!removed.size) return;
+  for (const t of pcb.traces ?? [])
+    for (const key of ["startPad", "endPad"] as const)
+      if (t[key] && removed.has(t[key]!.componentId)) delete t[key];
+  if (pcb.schematic) {
+    pcb.schematic.units = pcb.schematic.units.filter(
+      (u) => !removed.has(u.componentId),
+    );
+    pcb.schematic.labels = pcb.schematic.labels.filter(
+      (l) => !(l.anchor && removed.has(l.anchor.componentId)),
+    );
+    pcb.schematic.wires = pcb.schematic.wires.filter(
+      (w) =>
+        !(w.start && removed.has(w.start.componentId)) &&
+        !(w.end && removed.has(w.end.componentId)),
+    );
+    for (const w of pcb.schematic.wires)
+      if (w.connections?.some((a) => removed.has(a.componentId)))
+        w.connections = w.connections.filter(
+          (a) => !removed.has(a.componentId),
+        );
+  }
+}
 export function assignTerminalNet(
   pcb: VisualPcb,
   anchors: WireAnchor[],

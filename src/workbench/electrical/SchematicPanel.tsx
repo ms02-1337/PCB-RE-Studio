@@ -362,8 +362,11 @@ export function SchematicPanel(props: {
           /* Ignore stale navigation. */
         }
       }
-      if (p && (p.components?.length ?? 0)) {
-        const units = initialUnits(p.components!, [
+      // Self-heal schematic units: add missing ones for new components and
+      // drop orphans — including the all-components-deleted case, which the
+      // old `components?.length` gate skipped forever.
+      if (p && ((p.components?.length ?? 0) > 0 || (p.schematic?.units.length ?? 0) > 0)) {
+        const units = initialUnits(p.components ?? [], [
           ...(p.schematic?.units ?? []),
         ]);
         if (

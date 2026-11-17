@@ -84,6 +84,31 @@ describe("multi-image mapping scenes", () => {
     expect(migrated.components[1].shape).toEqual({ ellipse: { cx: 340, cy: 0, rx: 10, ry: 20 } });
     expect(normalizeMappingTabs(migrated).components).toEqual(migrated.components);
   });
+  it("preserves tilted rectangle and ellipse markings as polygons instead of inflated bounding boxes", () => {
+    const source = seededDoc();
+    source.boards.push({ id: "old", name: "Front", assetHash: "a".repeat(64), width: 200, height: 100, rotation: 30 });
+    const common = { boardId: "old", typeId: "resistor", status: "identified" as const, locked: false };
+    source.components.push({ ...common, id: "r1", refdes: "R1", shape: { rect: { x: 20, y: 20, w: 20, h: 20 } } });
+    source.components.push({ ...common, id: "r2", refdes: "R2", shape: { ellipse: { cx: 30, cy: 30, rx: 10, ry: 5 } } });
+    const migrated = normalizeMappingTabs(source);
+    const board = migrated.boards[0];
+    const point = (x: number, y: number) => imageToDisplay(board, { x, y });
+    // A 30° board rotation tilts the displayed shapes: the rect's corners are
+    // kept exactly (TL→TR→BR→BL), the ellipse becomes a 32-point outline —
+    // never the axis-aligned bounding box, which would silently grow the mark.
+    expect(migrated.components[0].shape).toEqual({
+      polygon: { points: [point(20, 20), point(40, 20), point(40, 40), point(20, 40)] },
+    });
+    expect(migrated.components[1].shape).toEqual({
+      polygon: {
+        points: Array.from({ length: 32 }, (_, i) => {
+          const angle = (i / 32) * Math.PI * 2;
+          return point(30 + 10 * Math.cos(angle), 30 + 5 * Math.sin(angle));
+        }),
+      },
+    });
+    expect(normalizeMappingTabs(migrated).components).toEqual(migrated.components);
+  });
   it("migrates old markings once into scene coordinates and keeps them after image movement or deletion", async () => {
     const { store, bridge } = makeStore();
     const source = seededDoc();

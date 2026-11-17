@@ -20,6 +20,7 @@ describe("NetsPanel", () => {
       id: "pcb-1",
       name: "Main Board",
       layers: ["top", "bottom"],
+      pxPerMm: 2,
       images: [],
       nets: [
         { id: "net-gnd", name: "GND", color: "#0000ff" },
@@ -145,6 +146,7 @@ describe("NetsPanel", () => {
     render(() => <NetsPanel store={store} onNavigate={onNavigate} />);
 
     expect(screen.getByRole("heading", { name: "PCB nets" })).toBeDefined();
+    expect(document.querySelector(".ve-nets-title-separator")).toBeTruthy();
     expect(screen.getByText(/2\s+nets/)).toBeDefined();
 
     const pcbSelect = screen.getByRole("combobox", {
@@ -263,6 +265,19 @@ describe("NetsPanel", () => {
     expect(screen.getByText(/Trace tr-1/)).toBeDefined();
     expect(screen.getByText(/Via via-1/)).toBeDefined();
     expect(screen.getByText(/U1 pin 1/)).toBeDefined();
+  });
+
+  it("reports via diameters in millimeters through the PCB calibration", () => {
+    render(() => <NetsPanel store={store} onNavigate={onNavigate} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /View elements in GND/i }),
+    );
+
+    // Via diameters are stored in world pixels (1.0 px here); with the PCB
+    // calibrated at 2 px/mm the listed size must be 0.50 mm, not "1.00mm"
+    // mislabeled as millimeters.
+    expect(screen.getByText(/Via via-1 \(Ø 0\.50mm\)/)).toBeDefined();
   });
 
   it("allows editing comments in the modal and persists changes", () => {

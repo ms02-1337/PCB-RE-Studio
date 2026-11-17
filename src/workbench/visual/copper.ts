@@ -271,7 +271,9 @@ export function touches(a: Conductor, b: Conductor): boolean {
 export function newNet(pcb: VisualPcb, name?: string) {
   pcb.nets ??= [];
   let n = 1;
-  while (pcb.nets.some((net) => net.name === `NET${n}`)) n++;
+  // Case-insensitive: a user net "net1" must still block auto "NET1" —
+  // NetsPanel's duplicate check is case-insensitive too.
+  while (pcb.nets.some((net) => net.name.toLowerCase() === `net${n}`)) n++;
   const palette = [
     "#e5484d",
     "#4f8fdb",

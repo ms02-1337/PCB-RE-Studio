@@ -443,6 +443,19 @@ describe("align (AC15)", () => {
     expect(c.cancel()).toEqual([]); // Esc exits
     expect(c.tool()).toBeNull();
   });
+
+  it("aborts collinear REFERENCE points instead of committing a singular align", () => {
+    const c = start("align", mkImage());
+    // Non-degenerate moving quad, collinear reference quad: solveAffine
+    // succeeds on the source side but the affine is singular — that must not
+    // half-commit as a warp-less translation with a success toast.
+    for (const [x, y] of [[30, 40], [60, 40], [60, 70], [30, 70]] as const) click(c, [x, y]);
+    for (const [x] of [[130], [160], [190]] as const) click(c, [x, 55]);
+    const intents = c.pointer(ev("down", [220, 55], [220, 55]));
+    expect(intents).toEqual([{ kind: "toast", message: "Reference points are collinear — alignment aborted" }]);
+    expect(item(c, "alignMarkers")!.points).toEqual([]);
+    expect(c.tool()).toBe("align");
+  });
 });
 
 describe("crop (AC16)", () => {
@@ -454,7 +467,7 @@ describe("crop (AC16)", () => {
       { x: 50, y: 60 }, { x: 110, y: 60 }, { x: 110, y: 120 }, { x: 50, y: 120 },
     ]);
     expect(c.pointer(ev("up", [110, 120], [110, 120]))).toEqual([
-      { kind: "commitCrop", imageId: "img-1", crop: { x: 40, y: 40, w: 60, h: 60 } },
+      { kind: "commitCrop", imageId: "img-1", patch: { crop: { x: 40, y: 40, w: 60, h: 60 }, x: 10, y: 20 } },
     ]);
     expect(c.tool()).toBeNull();
   });
@@ -463,7 +476,7 @@ describe("crop (AC16)", () => {
     const c = start("crop", mkImage());
     c.pointer(ev("down", [0, 10], [0, 10])); // source (−10,−10)
     const intents = c.pointer(ev("up", [220.4, 130.4], [220, 130])); // source (210.4, 110.4)
-    expect(intents).toEqual([{ kind: "commitCrop", imageId: "img-1", crop: { x: 0, y: 0, w: 200, h: 100 } }]);
+    expect(intents).toEqual([{ kind: "commitCrop", imageId: "img-1", patch: { crop: { x: 0, y: 0, w: 200, h: 100 }, x: 10, y: 20 } }]);
     expect(c.tool()).toBeNull();
   });
 
@@ -501,9 +514,23 @@ describe("crop (AC16)", () => {
     }
     // glued: NOT the axis-aligned world rect between the down and up points
     expect(Math.abs(polygon[1].x - w1.x) + Math.abs(polygon[1].y - w0.y)).toBeGreaterThan(1);
-    expect(c.pointer(ev("up", [w1.x, w1.y], [w1.x, w1.y]))).toEqual([
-      { kind: "commitCrop", imageId: "img-1", crop: { x: 20, y: 20, w: 60, h: 50 } },
-    ]);
+    const [commit] = c.pointer(ev("up", [w1.x, w1.y], [w1.x, w1.y])) as [
+      Extract<ToolIntent, { kind: "commitCrop" }>,
+    ];
+    expect(commit.kind).toBe("commitCrop");
+    expect(commit.patch.crop).toEqual({ x: 20, y: 20, w: 60, h: 50 });
+    // Pinning invariant: the compensated x/y keep every kept source pixel at
+    // its current world position, matching the preview polygon exactly (the
+    // raw crop would shift content by (I − L)·Δc ≈ (29, 34) px here).
+    const pinned = { ...image, ...commit.patch };
+    for (const p of [s0, s1, { x: 50, y: 45 }]) {
+      const before = sourceToWorld(image, p);
+      const after = sourceToWorld(pinned, p);
+      expect(after.x).toBeCloseTo(before.x, 9);
+      expect(after.y).toBeCloseTo(before.y, 9);
+    }
+    expect(pinned.x).toBeCloseTo(23.2, 1);
+    expect(pinned.y).toBeCloseTo(-9.21, 1);
   });
 });
 

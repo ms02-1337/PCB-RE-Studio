@@ -4,6 +4,7 @@ import { createPlacementStore } from "../placement/store";
 import { SEED_TYPES, type ProjectDoc } from "../placement/projectDoc";
 import { VisualCanvas } from "./VisualCanvas";
 import type { CopperEditor } from "./CopperEditor";
+import type { VisualPcb } from "./model";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -130,6 +131,10 @@ it("selects region with left drag and multi-moves elements together while ignori
     up: vi.fn(),
     down: vi.fn(),
     drawing: () => false,
+    // Multi-selection moves now route through the copper commit pipeline
+    // (CopperEditor.commitMoved); this scene has no components or nets, so
+    // the reconciled commit reduces to replaceCopper.
+    commitMoved: (next: VisualPcb) => store.visual.replaceCopper(next.id, next),
   } as unknown as CopperEditor;
 
   try {

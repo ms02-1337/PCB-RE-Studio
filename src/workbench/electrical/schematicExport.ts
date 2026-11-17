@@ -413,10 +413,16 @@ export function buildSchematicFiles(
   }
   const junctions = new Map<string, Point>();
   for (const w of displayedWires)
-    for (const p of [w.points[0], w.points.at(-1)!])
-      if (
-        p &&
-        displayedWires.filter((other) =>
+    for (const p of [w.points[0], w.points.at(-1)!]) {
+      if (!p) continue;
+      // A junction dot is needed only where an endpoint lands strictly
+      // INSIDE another wire's segment (a T-join). End-to-end touches connect
+      // in KiCad without a dot, and the wire's own segments never count, so
+      // the old "more than one containing segment" test dotted every plain
+      // two-wire corner.
+      const tJoin = displayedWires.some(
+        (other) =>
+          other !== w &&
           other.points.slice(1).some((b, i) => {
             const a = other.points[i],
               cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
@@ -425,12 +431,14 @@ export function buildSchematicFiles(
               p.x >= Math.min(a.x, b.x) - 1e-6 &&
               p.x <= Math.max(a.x, b.x) + 1e-6 &&
               p.y >= Math.min(a.y, b.y) - 1e-6 &&
-              p.y <= Math.max(a.y, b.y) + 1e-6
+              p.y <= Math.max(a.y, b.y) + 1e-6 &&
+              distance(p, a) > 1e-6 &&
+              distance(p, b) > 1e-6
             );
           }),
-        ).length > 1
-      )
-        junctions.set(`${p.x}/${p.y}`, p);
+      );
+      if (tJoin) junctions.set(`${p.x}/${p.y}`, p);
+    }
   const sch = `(kicad_sch (version 20250114) (generator "pcb_re_studio") (uuid ${root}) (paper "A3") (lib_symbols ${components.map((c) => symbol(c, names.get(c.id)!, doc.units)).join("\n")}) ${wires.join("\n")} ${[...junctions].map(([id, p]) => `(junction (at ${n(p.x)} ${n(p.y)}) (diameter 0) (color 0 0 0 0) (uuid ${stableUuid(`${pcb.id}/junction/${id}`)}))`).join("\n")} ${labels.join("\n")} ${nc.join("\n")} ${units.join("\n")} (embedded_fonts no))`;
   const files = [
     { name: "pcb-re-studio.kicad_sch", text: sch },

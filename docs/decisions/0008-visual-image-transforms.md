@@ -88,7 +88,9 @@ mapping (0003) and a strict asset boundary where image bytes never cross JS.
 - Crop is non-destructive and cheap to undo (one rect per gesture); it
   deviates from the reference app's pixel baking by design — pixels never
   cross IPC, no new assets are created, and crop never invalidates other
-  images' alignments.
+  images' alignments. A crop commit also compensates x/y for the moved crop
+  center, so every KEPT source pixel stays at its current world position
+  (identity-transform photos keep their exact x/y).
 - Transforming an image that participates in an alignment can visually break
   that alignment; the UI warns before Rotate/Align/Crop/Resize/Deskew when
   the target or any sibling image carries a `warp` or a `perspective` (the

@@ -147,10 +147,36 @@ export function normalizeSceneComponents(doc: ProjectDoc): ProjectDoc {
         y: component.shape.ellipse.cy - component.shape.ellipse.ry,
         w: component.shape.ellipse.rx * 2, h: component.shape.ellipse.ry * 2,
       };
-      const corners = [point({ x: rect.x, y: rect.y }), point({ x: rect.x + rect.w, y: rect.y }), point({ x: rect.x, y: rect.y + rect.h }), point({ x: rect.x + rect.w, y: rect.y + rect.h })];
-      const x = Math.min(...corners.map((p) => p.x)), y = Math.min(...corners.map((p) => p.y));
-      const w = Math.max(...corners.map((p) => p.x)) - x, h = Math.max(...corners.map((p) => p.y)) - y;
-      shape = "rect" in component.shape ? { rect: { x, y, w, h } } : { ellipse: { cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2 } };
+      const corners = [
+        point({ x: rect.x, y: rect.y }),
+        point({ x: rect.x + rect.w, y: rect.y }),
+        point({ x: rect.x + rect.w, y: rect.y + rect.h }),
+        point({ x: rect.x, y: rect.y + rect.h }),
+      ];
+      const axisAligned = corners.every((p, i) => {
+        const q = corners[(i + 1) % corners.length];
+        return Math.abs(p.x - q.x) < 1e-6 || Math.abs(p.y - q.y) < 1e-6;
+      });
+      if (axisAligned) {
+        const x = Math.min(...corners.map((p) => p.x)), y = Math.min(...corners.map((p) => p.y));
+        const w = Math.max(...corners.map((p) => p.x)) - x, h = Math.max(...corners.map((p) => p.y)) - y;
+        shape = "rect" in component.shape ? { rect: { x, y, w, h } } : { ellipse: { cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2 } };
+      } else {
+        // A fractional board rotation tilts the displayed shape; storing its
+        // axis-aligned bounding box would silently inflate it. Preserve the
+        // displayed geometry instead: rect corners map exactly, an ellipse
+        // outline is approximated by a 32-point polygon.
+        const outline = "rect" in component.shape
+          ? corners
+          : Array.from({ length: 32 }, (_, i) => {
+            const angle = (i / 32) * Math.PI * 2;
+            return point({
+              x: rect.x + rect.w / 2 + (rect.w / 2) * Math.cos(angle),
+              y: rect.y + rect.h / 2 + (rect.h / 2) * Math.sin(angle),
+            });
+          });
+        shape = { polygon: { points: outline } };
+      }
     }
     return { ...component, shape, coordinateSpace: "scene", mappingTabId: tab.id };
   }) };

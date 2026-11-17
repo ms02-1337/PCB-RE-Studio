@@ -161,6 +161,11 @@ pub struct SchematicWire {
     pub start: Option<WireAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<WireAnchor>,
+    /// Mid-wire pin anchors (SchematicWire.connections in the frontend);
+    /// absent = none. Must round-trip with
+    /// src/workbench/electrical/model.ts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<Vec<WireAnchor>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_id: Option<String>,
 }

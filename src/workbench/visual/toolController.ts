@@ -76,7 +76,7 @@ export type ToolIntent =
   | { kind: "commitCalibrate"; pxPerMm: number }
   | { kind: "promptResizeAxis"; axis: "x" | "y"; spanPx: number }
   | { kind: "commitRotation"; imageId: string; patch: RotationPatch }
-  | { kind: "commitCrop"; imageId: string; crop: CropRect }
+  | { kind: "commitCrop"; imageId: string; patch: { crop: CropRect; x: number; y: number } }
   | { kind: "commitAlign"; imageId: string; patch: { x: number; y: number; warp: Warp2 }; residualPx: number }
   | { kind: "commitResize"; imageId: string; warp: Warp2 }
   | { kind: "commitDeskew"; imageId: string; perspective: Perspective3 }
@@ -439,6 +439,13 @@ export function createVisualToolController(): VisualToolController {
       s.points = []; // stay in the tool, start over
       return [{ kind: "toast", message: "Points are collinear — alignment aborted" }];
     }
+    // solveAffine only rejects degeneracy of the MOVING points; a collinear
+    // reference quad still yields a singular (or near-singular) affine whose
+    // warp cleanWarp would drop while the x/y translation half-commits.
+    if (Math.abs(T.a * T.d - T.b * T.c) < 1e-6) {
+      s.points = [];
+      return [{ kind: "toast", message: "Reference points are collinear — alignment aborted" }];
+    }
     const image = s.image;
     const r = visualCropRect(image);
     const t = imageAnchor(image);
@@ -489,8 +496,25 @@ export function createVisualToolController(): VisualToolController {
       return [{ kind: "toast", message: "Crop area too small — try again" }]; // stay in tool
     }
     const image = s.image;
+    // Keep every kept pixel at its current world position: the anchor is a
+    // function of the crop rect (imageAnchor = x + cropCenter), so shifting
+    // the crop center by Δc moves content by (I − L)·Δc unless x/y absorb
+    // the linear map of the center delta: t' = t + L·Δc (L unchanged by a
+    // crop-only commit). Identity transforms leave x/y exactly as they were.
+    const before = visualCropRect(image);
+    const anchor = imageAnchor(image);
+    const linear = imageLinear(image);
+    const delta = {
+      x: crop.x + crop.w / 2 - (before.x + before.w / 2),
+      y: crop.y + crop.h / 2 - (before.y + before.h / 2),
+    };
+    const patch = {
+      crop,
+      x: anchor.x + (linear.a * delta.x + linear.c * delta.y) - (crop.x + crop.w / 2),
+      y: anchor.y + (linear.b * delta.x + linear.d * delta.y) - (crop.y + crop.h / 2),
+    };
     clear();
-    return [{ kind: "commitCrop", imageId: image.id, crop }];
+    return [{ kind: "commitCrop", imageId: image.id, patch }];
   };
 
   const cropOverlay = (s: CropState): VisualToolOverlay[] => {

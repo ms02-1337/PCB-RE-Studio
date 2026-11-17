@@ -211,7 +211,9 @@ export function createCopperEditor(
             if (
               next.nets!.some(
                 (n) =>
-                  n.id !== id && !ids.includes(n.id) && n.name === name.trim(),
+                  n.id !== id &&
+                  !ids.includes(n.id) &&
+                  n.name.toLowerCase() === name.trim().toLowerCase(),
               )
             ) {
               setMessage("Net name already exists.");
@@ -1261,7 +1263,7 @@ export function createCopperEditor(
               (n) =>
                 n.id !== targetNetId &&
                 !state.choices.some((c) => c.id === n.id) &&
-                n.name === trimmed,
+                n.name.toLowerCase() === trimmed.toLowerCase(),
             )
           ) {
             setMessage("Net name already exists.");
@@ -1459,6 +1461,12 @@ export function createCopperEditor(
     cancel,
     finish,
     remove,
+    /** Reconciled commit for callers that mutate several elements at once
+     * (multi-selection move): runs the same stale-anchor cleanup, NC-contact
+     * confirmation and net-merge pending dialog as single-element edits.
+     * `next` is the caller's full proposed PCB; `seeds` are moved element ids
+     * plus moved components' `id:terminal` keys. */
+    commitMoved: (next: VisualPcb, seeds: string[]) => commit(next, seeds, false),
     applyDefaults,
     key: (key: string) => {
       if (key === "Escape") {

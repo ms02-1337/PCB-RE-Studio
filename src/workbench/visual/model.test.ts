@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createVisualActions } from "./actions";
 import { initialVisualEditor, layerLabel, MAX_VISUAL_LAYERS, hitVisualImage, makeVisualImage, newVisualPcb, type VisualImage } from "./model";
 import { SEED_TYPES, type ProjectDoc } from "../placement/projectDoc";
+import { fixtureComponent } from "../electrical/testFixtures";
 
 const asset = { hash: "a".repeat(64), size: 42, name: "photo.png" };
 function fixture() {
@@ -49,6 +50,40 @@ describe("visual photograph model", () => {
   it("rejects invalid image dimensions, foreign tags and opacity", () => {
     const { actions, add } = fixture(); actions.addImage(actions.activePcb()!.id, asset, "Invalid", 0, 1); expect(actions.activePcb()!.images).toHaveLength(0);
     const image = add("Valid"); actions.updateImage(image.id, { opacity: NaN, layerId: "foreign" }); expect(image.opacity).toBe(1); expect(image.layerId).toBeUndefined();
+  });
+
+  it("layer-resize net merge rewrites terminals and schematic alongside copper", () => {
+    const { actions } = fixture();
+    actions.resizeLayers(3);
+    const pcb = actions.activePcb()!;
+    const [front, inner] = pcb.layers;
+    const netA = { id: "netA", name: "A", color: "#e5484d" };
+    const netB = { id: "netB", name: "B", color: "#4f8fdb" };
+    pcb.nets = [netA, netB];
+    const component = fixtureComponent("c1", "R1");
+    component.x = 100;
+    component.y = 100;
+    component.layerId = front;
+    component.terminals = [{ number: "1", netId: "netB" }, { number: "2" }];
+    pcb.components = [component];
+    // The inner-layer trace lands on pad 1 (world ~(99,100)): forced onto the
+    // front layer its connected group spans nets A and B.
+    pcb.traces = [{ id: "t1", layerId: inner, points: [{ x: 99, y: 100 }, { x: 140, y: 100 }], width: 2, netId: netA.id }];
+    pcb.schematic = {
+      units: [],
+      wires: [{ id: "w1", points: [{ x: 0, y: 0 }, { x: 10, y: 0 }], netId: netB.id }],
+      labels: [{ id: "l1", x: 0, y: 0, netId: netB.id }],
+    };
+    actions.resizeLayers(2, front, netA.id);
+    expect(pcb.layers).toHaveLength(2);
+    expect(pcb.layers).toContain(front);
+    expect(pcb.traces![0].layerId).toBe(front);
+    expect(pcb.nets?.map((n) => n.id)).toEqual([netA.id]);
+    // The whole plan is committed: terminals and schematic references must
+    // not keep pointing at the net the merge deleted.
+    expect(pcb.components![0].terminals[0].netId).toBe(netA.id);
+    expect(pcb.schematic!.wires[0].netId).toBe(netA.id);
+    expect(pcb.schematic!.labels[0].netId).toBe(netA.id);
   });
 });
 

@@ -4,7 +4,6 @@ import {
   initialVisualEditor,
   makeVisualImage,
   newVisualPcb,
-  resizeLayers,
 } from "./model";
 import type { AssetInfo, CropRect, ProjectDoc } from "../placement/projectDoc";
 import { layerResizePlan, mergeNets } from "./copper";
@@ -226,13 +225,41 @@ export function createVisualActions(
           if (!survivor || !plan.conflicts.includes(survivor)) return;
           mergeNets(plan.next, plan.conflicts, survivor);
         }
-        resizeLayers(pcb, count);
-        Object.assign(pcb, {
-          nets: plan.next.nets,
-          traces: plan.next.traces,
-          zones: plan.next.zones,
-          vias: plan.next.vias,
-        });
+        // Mirror the reconciled plan into the LIVE pcb without replacing any
+        // nested object: every other visual action mutates in place, and
+        // callers hold references to individual images/components/copper
+        // items. This action only relabels and merges — it never adds or
+        // removes elements — so copying element fields by id is exact; only
+        // the layer list and merged-away nets change array membership.
+        pcb.layers = plan.next.layers;
+        pcb.nets = plan.next.nets;
+        for (const image of pcb.images) {
+          const next = plan.next.images.find((i) => i.id === image.id);
+          if (!next) continue;
+          // resizeLayers DELETES layerId on images from removed layers;
+          // Object.assign alone would leave the stale key behind.
+          if (!("layerId" in next)) delete image.layerId;
+          Object.assign(image, next);
+        }
+        for (const key of [
+          "components",
+          "traces",
+          "zones",
+          "vias",
+        ] as const)
+          for (const item of pcb[key] ?? []) {
+            const next = plan.next[key]?.find((e) => e.id === item.id);
+            if (next) Object.assign(item, next);
+          }
+        if (pcb.schematic && plan.next.schematic) {
+          for (const key of ["units", "wires", "labels"] as const)
+            for (const item of pcb.schematic[key]) {
+              const next = plan.next.schematic![key].find(
+                (e) => e.id === item.id,
+              );
+              if (next) Object.assign(item, next);
+            }
+        }
       }),
     addImage: (
       pcbId: string,

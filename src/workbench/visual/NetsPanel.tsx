@@ -427,9 +427,12 @@ export function NetsPanel(props: {
               // Vias
               for (const v of p.vias ?? []) {
                 if (v.netId === netId) {
+                  // Diameter is stored in world px like every inspector
+                  // neighbor; convert through the PCB calibration.
+                  const pxPerMm = p.pxPerMm ?? 1;
                   list.push({
                     type: "Via",
-                    name: `Via ${v.id}${v.diameter != null ? ` (Ø ${v.diameter.toFixed(2)}mm)` : ""}`,
+                    name: `Via ${v.id}${v.diameter != null ? ` (Ø ${(v.diameter / pxPerMm).toFixed(2)}mm)` : ""}`,
                     layer: "All layers",
                     comment: v.comment ?? "",
                     onSaveComment: (val) => {

@@ -291,6 +291,10 @@ pub struct CopperTrace {
     pub start_pad: Option<crate::kicad::types::WireAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_pad: Option<crate::kicad::types::WireAnchor>,
+    /// Structure frozen flag; absent = unlocked. Must round-trip with the
+    /// frontend's `CopperTrace.locked` (src/workbench/visual/model.ts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
@@ -302,6 +306,9 @@ pub struct CopperZone {
     pub points: Vec<Point>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_id: Option<String>,
+    /// See CopperTrace::locked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
@@ -315,6 +322,9 @@ pub struct CopperVia {
     pub drill: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_id: Option<String>,
+    /// See CopperTrace::locked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
@@ -1075,6 +1085,7 @@ pub fn referenced_hashes(doc: &ProjectDoc) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn copper_doc() -> ProjectDoc {
         let mut value = serde_json::to_value(visual_doc()).unwrap();
@@ -1252,6 +1263,39 @@ mod tests {
         let mut bad = original;
         bad.visual_editor.as_mut().unwrap().pcbs[0].images[0].asset_hash = "b".repeat(64);
         assert!(validate(&bad).is_err());
+    }
+
+    #[test]
+    fn copper_locks_and_wire_connections_round_trip() {
+        // The frontend stamps `locked` on traces/zones/vias and mid-wire pin
+        // anchors (`connections`) on schematic wires; both must survive a
+        // save/load cycle instead of being silently stripped, and the
+        // validator must reject anchors pointing at missing terminals.
+        let mut value = serde_json::to_value(visual_doc()).unwrap();
+        value["boards"] = json!([]);
+        value["components"] = json!([]);
+        value["activeBoardId"] = json!(null);
+        let definition = json!({"id":"d","name":"Resistor","partName":"R","value":"10k","referencePrefix":"R","footprint":{"id":"f","name":"R","source":"R","raw":"(footprint R)","pads":[{"number":"3","x":0,"y":0,"width":1,"height":1,"rotation":0,"shape":"rect","plated":false,"layers":["F.Cu"]}],"graphics":[],"diagnostics":[]},"pinMap":{}});
+        let pcb = &mut value["visualEditor"]["pcbs"][0];
+        pcb["components"] = json!([{"id":"c1","reference":"U1","definition":definition,"value":"u","partName":"U","x":0,"y":0,"layerId":"front","rotation":0,"scale":1,"terminals":[{"number":"3"}]}]);
+        pcb["traces"] = json!([{ "id": "trace-1", "layerId": "front", "width": 2, "locked": true, "points": [{"x":0,"y":0},{"x":10,"y":0}] }]);
+        pcb["zones"] = json!([{ "id": "zone-1", "layerId": "back", "locked": true, "points": [{"x":0,"y":0},{"x":10,"y":0},{"x":0,"y":10}] }]);
+        pcb["vias"] =
+            json!([{ "id": "via-1", "x": 10, "y": 0, "diameter": 4, "drill": 2, "locked": true }]);
+        pcb["schematic"] = json!({"units":[],"wires":[{"id":"w1","points":[{"x":0,"y":0},{"x":10,"y":0}],"connections":[{"componentId":"c1","terminal":"3"}]}],"labels":[]});
+        let doc: ProjectDoc = serde_json::from_value(value).unwrap();
+        let json = serde_json::to_string(&doc).unwrap();
+        assert!(json.contains("\"locked\":true"));
+        assert!(json.contains("\"connections\":[{\"componentId\":\"c1\",\"terminal\":\"3\"}]"));
+        let restored: ProjectDoc = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, doc);
+        assert!(validate(&restored).is_ok());
+        // A connections anchor pointing at a missing terminal is rejected
+        // exactly like dangling start/end anchors.
+        let mut bad = serde_json::to_value(&doc).unwrap();
+        bad["visualEditor"]["pcbs"][0]["schematic"]["wires"][0]["connections"] =
+            json!([{"componentId":"nope","terminal":"3"}]);
+        assert!(validate(&serde_json::from_value(bad).unwrap()).is_err());
     }
 
     #[test]

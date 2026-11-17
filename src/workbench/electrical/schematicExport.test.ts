@@ -77,6 +77,28 @@ it("exports deterministic portable KiCad9 files and materializes assigned-net la
     ),
   );
 });
+it("places junction dots only at strict T-joins, not corners or end-to-end touches", () => {
+  const p = fixture();
+  p.components = [];
+  p.schematic = {
+    units: [],
+    wires: [
+      { id: "wa", points: [{ x: 0, y: 0 }, { x: 40, y: 0 }] },
+      // end-to-end with wa at (40,0): connected in KiCad WITHOUT a dot
+      { id: "wb", points: [{ x: 40, y: 0 }, { x: 40, y: 30 }] },
+      // starts strictly inside wa's segment: a true T-join needing a dot
+      { id: "wc", points: [{ x: 10, y: 0 }, { x: 10, y: 25 }] },
+      // end-to-end with wa at (0,0) — wa's own corner region, still no dot
+      { id: "wd", points: [{ x: 0, y: -20 }, { x: 0, y: 0 }] },
+    ],
+    labels: [],
+  };
+  const schematic = buildSchematicFiles(project, p).find((f) => f.name.endsWith(".kicad_sch"))!.text;
+  // Exactly one junction: the T at (10,0). The old containment test also
+  // dotted every corner/end-to-end touch ((0,0) and (40,0) here).
+  expect(schematic.match(/\(junction/g)?.length).toBe(1);
+  expect(schematic).toContain("(junction (at 10 0)");
+});
 it("exports alternate unit bodies and all multi-unit gates", () => {
   const p = fixture(),
     c = p.components![0];

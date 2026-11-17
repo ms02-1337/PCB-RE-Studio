@@ -49,8 +49,13 @@ export function groupBom(members: BomMember[]): BomRow[] {
   }));
 }
 export function bomCsv(rows: BomRow[], includePcb = false): string {
-  const quote = (value: string | number) =>
-    `"${String(value).replaceAll('"', '""')}"`;
+  // Quote every field; neutralize spreadsheet formula prefixes (=, +, -, @,
+  // tab, CR) so user data can't become a formula when opened in Excel/LibreOffice/Sheets.
+  const quote = (value: string | number) => {
+    let s = String(value);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return `"${s.replaceAll('"', '""')}"`;
+  };
   return [
     [
       "ID",
@@ -234,13 +239,16 @@ export function BomPanel(props: {
       if (
         field === "reference" &&
         (!value.trim() ||
+          value.trim().length > 200 ||
           next.components?.some(
             (c) =>
-              c.reference === value.trim() &&
+              c.reference.toLowerCase() === value.trim().toLowerCase() &&
               !list.some((m) => m.component.id === c.id),
           ))
       ) {
-        setError("Reference must be nonempty and unique within its PCB.");
+        setError(
+          "Reference must be nonempty, at most 200 chars, and unique (case insensitive) within its PCB.",
+        );
         return;
       }
       for (const c of next.components ?? [])

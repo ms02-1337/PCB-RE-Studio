@@ -124,6 +124,13 @@ describe("copper geometry", () => {
     expect(p.traces[0].netId).toBe(b.id);
     expect(p.zones[0].netId).toBe(b.id);
   });
+  it("auto-numbers nets case-insensitively around user-chosen names", () => {
+    const p = newVisualPcb();
+    newNet(p, "net1"); // user's lowercase name must block auto NET1
+    newNet(p, "Net3");
+    expect(newNet(p).name).toBe("NET2");
+    expect(newNet(p).name).toBe("NET4");
+  });
 });
 
 it("marks open ends of segmented traces and clears a physically reconnected end", () => {

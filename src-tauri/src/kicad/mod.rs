@@ -452,7 +452,11 @@ pub fn validate_pcb(pcb: &crate::project::schema::VisualPcb, errors: &mut Vec<St
             {
                 errors.push("Invalid schematic wire".into());
             }
-            for a in [&w.start, &w.end].into_iter().flatten() {
+            for a in [&w.start, &w.end]
+                .into_iter()
+                .flatten()
+                .chain(w.connections.iter().flatten())
+            {
                 if !pcb.components.iter().any(|c| {
                     c.id == a.component_id && c.terminals.iter().any(|t| t.number == a.terminal)
                 }) {

@@ -175,7 +175,10 @@ main.is-panning { cursor: grabbing; }
 .scene-image { position: absolute; }
 .scene-overlay { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .scene-overlay .comp { pointer-events: visiblePainted; }
-.frame { position: relative; overflow: hidden; border: 1px solid var(--border); background: var(--surface); }
+/* outline (not border): a border shifts the padding box and with it every
+   percentage-positioned child, systematically offsetting the picture ~1px
+   up-left relative to the scene-space overlay grid. */
+.frame { position: relative; overflow: hidden; outline: 1px solid var(--border); outline-offset: -1px; background: var(--surface); }
 .clip { position: absolute; overflow: hidden; transform-origin: center; }
 .inner { position: relative; }
 .inner img, .inner svg { position: absolute; inset: 0; display: block; user-select: none; }
