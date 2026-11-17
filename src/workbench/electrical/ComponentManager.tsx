@@ -119,6 +119,7 @@ export function ComponentManager(props: {
           footprint: fp,
           symbol: undefined,
           pinMap: {},
+          ncPins: d?.ncPins ?? [],
         };
         next.pinMap = Object.fromEntries(terminalNumbers(next).map(n => [n,n]));
         setDefinition(next);
@@ -232,7 +233,8 @@ export function ComponentManager(props: {
       ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,dimensions.width,dimensions.height);
       if(!d)return;
       ctx.save();ctx.translate(mapping.x,mapping.y);ctx.scale(mapping.scale,mapping.scale);
-      ctx.strokeStyle="#ffcd11";ctx.fillStyle="#ffcd11";
+      const textColor = (surface ? getComputedStyle(surface).getPropertyValue("--text").trim() : "") || "#ccc";
+      ctx.strokeStyle = textColor;ctx.fillStyle = textColor;
       if (p.symbol && d.symbol) {
         const units = d.symbol.units.filter(
           (u) =>
@@ -275,7 +277,7 @@ export function ComponentManager(props: {
             terminals: [],
           },
           1,
-          "#ffcd11",
+          textColor,
         );
       else {
         ctx.strokeRect(-10, -8, 20, 16);
@@ -373,16 +375,16 @@ export function ComponentManager(props: {
 
               </div>
               <Show when={importStatus()}><p role="status" aria-label="Import result" class="component-import-status">{importStatus()}</p></Show>
-              <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results" aria-busy={loading() && kind() !== "saved"}><Show when={!loading() || kind() === "saved"} fallback={<div class="component-library-loading" role="status" aria-live="polite"><span class="component-library-spinner" aria-hidden="true" /><strong>Loading KiCad library</strong><span>Fetching {kind() === "symbol" ? "symbols" : "footprints"}...</span></div>}><table><thead><tr><th>Name</th><Show when={kind() === "saved"} fallback={<th>Source</th>}><th>Footprint</th><th>Symbol</th></Show><th>Actions</th></tr></thead><tbody>
-                <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td>{entry.name}</td><td>{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td><div class="component-row-actions"><button disabled={busy() || loading() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></div></td></tr>}</For>}>
+              <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results" aria-busy={loading() && kind() !== "saved"}><Show when={!loading() || kind() === "saved"} fallback={<div class="component-library-loading" role="status" aria-live="polite"><span class="component-library-spinner" aria-hidden="true" /><strong>Loading KiCad library</strong><span>Fetching {kind() === "symbol" ? "symbols" : "footprints"}...</span></div>}><table><thead><tr><th class="col-name">Name</th><Show when={kind() === "saved"} fallback={<th class="col-source">Source</th>}><th class="col-footprint">Footprint</th><th class="col-symbol">Symbol</th></Show><th class="col-actions">Actions</th></tr></thead><tbody>
+                <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td class="col-name">{entry.name}</td><td class="col-source">{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td class="col-actions"><div class="component-row-actions"><button disabled={busy() || loading() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></div></td></tr>}</For>}>
                   <For each={saved().filter(d => d.name.toLowerCase().includes(query().toLowerCase())).sort((a,b) => a.name.localeCompare(b.name))}>{d => {
                     const inUse = isComponentInUse(d);
                     return (
                       <tr classList={{ selected: definition()?.id === d.id }}>
-                        <td>{d.name}</td>
-                        <td>{d.footprint.name}</td>
-                        <td>{d.symbol?.name ?? "Generic"}</td>
-                        <td>
+                        <td class="col-name">{d.name}</td>
+                        <td class="col-footprint">{d.footprint.name}</td>
+                        <td class="col-symbol">{d.symbol?.name ?? "Generic"}</td>
+                        <td class="col-actions">
                           <div class="component-row-actions">
                             <button onClick={() => { setDefinition(structuredClone(d)); setSavedFlow(true); navigate("review"); }}>Load</button>
                             <button aria-label={`Duplicate ${d.name}`} onClick={() => { setDefinition({ ...structuredClone(d), id: visualId(), name: d.name + " copy" }); setSavedFlow(true); navigate("review"); }}>Duplicate</button>
@@ -433,54 +435,78 @@ export function ComponentManager(props: {
                   <div class="component-pin-table"><table>
                     <thead>
                       <tr>
-                        <th>Pad</th>
-                        <th>Symbol pin</th>
+                        <th class="col-pad">Pad</th>
+                        <th class="col-symbol-pin">Symbol pin</th>
+                        <th class="col-nc" title="Not connected (NC)">NC</th>
                       </tr>
                     </thead>
                     <tbody>
                       <For each={terminalNumbers(definition()!)}>
-                        {(number) => (
-                          <tr
-                            classList={{ selected: selectedPad() === number }}
-                            onClick={() => setSelectedPad(number)}
-                          >
-                            <td>{number}</td>
-                            <td>
-                              <select
-                                aria-label={`Map pad ${number}`}
-                                value={definition()!.pinMap[number] ?? ""}
-                                onChange={(e) =>
-                                  patch({
-                                    pinMap: {
-                                      ...definition()!.pinMap,
-                                      [number]: e.currentTarget.value,
-                                    },
-                                  })
-                                }
-                              >
-                                <option value="">Unmapped</option>
-                                <For
-                                  each={[
-                                    ...new Map(
-                                      definition()?.symbol?.units
-                                        .flatMap((u) => u.pins)
-                                        .map((p) => [p.number, p]) ?? [],
-                                    ).values(),
-                                  ]}
+                        {(number) => {
+                          const isNc = () => definition()!.ncPins?.includes(number) ?? false;
+                          return (
+                            <tr
+                              classList={{ selected: selectedPad() === number }}
+                              onClick={() => setSelectedPad(number)}
+                            >
+                              <td class="col-pad">{number}</td>
+                              <td class="col-symbol-pin">
+                                <select
+                                  aria-label={`Map pad ${number}`}
+                                  value={definition()!.pinMap[number] ?? ""}
+                                  onChange={(e) =>
+                                    patch({
+                                      pinMap: {
+                                        ...definition()!.pinMap,
+                                        [number]: e.currentTarget.value,
+                                      },
+                                    })
+                                  }
                                 >
-                                  {(p) => (
-                                    <option value={p.number}>
-                                      {p.number} - {p.name}
-                                    </option>
-                                  )}
-                                </For>
-                                <Show when={!definition()!.symbol}>
-                                  <option value={number}>{number}</option>
-                                </Show>
-                              </select>
-                            </td>
-                          </tr>
-                        )}
+                                  <option value="">Unmapped</option>
+                                  <For
+                                    each={[
+                                      ...new Map(
+                                        definition()?.symbol?.units
+                                          .flatMap((u) => u.pins)
+                                          .map((p) => [p.number, p]) ?? [],
+                                      ).values(),
+                                    ]}
+                                  >
+                                    {(p) => (
+                                      <option value={p.number}>
+                                        {p.number} - {p.name}
+                                      </option>
+                                    )}
+                                  </For>
+                                  <Show when={!definition()!.symbol}>
+                                    <option value={number}>{number}</option>
+                                  </Show>
+                                </select>
+                              </td>
+                              <td class="col-nc">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`NC pad ${number}`}
+                                  title={`Not connected pad ${number}`}
+                                  checked={isNc()}
+                                  onChange={(e) => {
+                                    const checked = e.currentTarget.checked;
+                                    const currentNc = new Set(definition()!.ncPins ?? []);
+                                    if (checked) {
+                                      currentNc.add(number);
+                                    } else {
+                                      currentNc.delete(number);
+                                    }
+                                    patch({
+                                      ncPins: [...currentNc],
+                                    });
+                                  }}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        }}
                       </For>
                     </tbody>
                   </table></div>
