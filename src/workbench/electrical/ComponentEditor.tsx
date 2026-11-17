@@ -738,7 +738,7 @@ export function createComponentEditor(
                       />
                       <button
                         type="button"
-                        class="component-step-btn"
+                        class="component-stepper-btn"
                         aria-label={`Decrease component ${key}`}
                         title={`Decrease ${key}`}
                         disabled={c.locked}
@@ -766,7 +766,7 @@ export function createComponentEditor(
                       </button>
                       <button
                         type="button"
-                        class="component-step-btn"
+                        class="component-stepper-btn"
                         aria-label={`Increase component ${key}`}
                         title={`Increase ${key}`}
                         disabled={c.locked}

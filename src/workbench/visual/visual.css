@@ -798,7 +798,8 @@
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
 }
 .component-manager .component-steps > span {
   flex: 0 0 auto;
@@ -885,8 +886,8 @@
 .component-manager .component-manager-body{overflow:hidden}
 .component-manager .component-manager-body>main{display:flex;flex-direction:column;height:100%;min-height:0;box-sizing:border-box;overflow:hidden}
 .component-manager .component-steps{flex:0 0 auto;align-items:center;margin:0 0 10px;padding:8px 0;gap:16px}
-.component-step-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
-.component-manager .component-steps button.component-step-btn{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;padding:0 16px;font-size:12px;font-weight:500;line-height:normal;text-align:center;white-space:nowrap;box-sizing:border-box;border-radius:4px;cursor:pointer;transition:background-color .15s,border-color .15s,color .15s}
+.component-step-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0}
+.component-manager .component-steps button.component-step-btn{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;padding:0 16px;width:auto;min-width:auto;font-size:12px;font-weight:500;line-height:normal;text-align:center;white-space:nowrap;box-sizing:border-box;border-radius:4px;cursor:pointer;flex-shrink:0;transition:background-color .15s,border-color .15s,color .15s}
 .component-manager .component-steps button.component-step-back{background:var(--surface);border:1px solid var(--border);color:var(--text)}
 .component-manager .component-steps button.component-step-back:hover:not(:disabled){background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
 .component-manager .component-steps button.component-step-back:disabled{opacity:.4;cursor:not-allowed}
@@ -1159,7 +1160,7 @@
   min-width: 0;
   height: 26px;
 }
-.component-step-btn {
+.component-stepper-btn {
   width: 26px;
   min-width: 26px;
   height: 26px;
@@ -1181,14 +1182,14 @@
   box-sizing: border-box;
   transition: background-color 0.15s, border-color 0.15s;
 }
-.component-step-btn:hover:not(:disabled) {
+.component-stepper-btn:hover:not(:disabled) {
   background: var(--raised, #2a2a2a);
   border-color: var(--focus, #ffcd11);
 }
-.component-step-btn:active:not(:disabled) {
+.component-stepper-btn:active:not(:disabled) {
   background: var(--border);
 }
-.component-step-btn:disabled {
+.component-stepper-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
