@@ -15,7 +15,7 @@ import {
   padPoint,
 } from "./domain";
 import { mergeNets, newNet, ncContacts } from "../visual/copper";
-import type { VisualPcb } from "../visual/model";
+import { layerLabel, type VisualPcb } from "../visual/model";
 import { ComponentManager } from "./ComponentManager";
 import { ActionIcon } from "../ActionIcon";
 export function createComponentEditor(
@@ -44,6 +44,34 @@ export function createComponentEditor(
   let cursor: Point = { x: 0, y: 0 },
     drag: { id: string; start: Point; origin: VisualPcb } | null = null,
     session = "";
+  const componentLayers = (currentLayerId?: string) => {
+    const layers = pcb()?.layers ?? [];
+    if (layers.length === 0) return [];
+    if (layers.length === 1) {
+      return [{ id: layers[0], label: layerLabel(0, 1) }];
+    }
+    const front = { id: layers[0], label: layerLabel(0, layers.length) };
+    const back = {
+      id: layers[layers.length - 1],
+      label: layerLabel(layers.length - 1, layers.length),
+    };
+    const list = [front, back];
+    if (currentLayerId && !list.some((l) => l.id === currentLayerId)) {
+      const idx = layers.indexOf(currentLayerId);
+      list.push({
+        id: currentLayerId,
+        label: idx >= 0 ? layerLabel(idx, layers.length) : currentLayerId,
+      });
+    }
+    return list;
+  };
+  const targetPlacementLayer = (targetPcb: VisualPcb = pcb()!) => {
+    const layers = targetPcb?.layers ?? [];
+    const current = layer();
+    if (layers.length <= 1) return layers[0] ?? current;
+    const back = layers[layers.length - 1];
+    return current === back ? back : layers[0];
+  };
   const current = () => pcb()?.components?.find((c) => c.id === selected());
   /** Derived overlap notification: recomputed from committed placements, so
    * it never touches the document and vanishes as soon as pairs separate. */
@@ -656,6 +684,7 @@ export function createComponentEditor(
                   class="component-action-icon-btn"
                   aria-label="Change footprint / symbol"
                   title="Change footprint / symbol"
+                  disabled={c.locked}
                   onClick={() => open([c.id])}
                 >
                   <ActionIcon name="replace" />
@@ -667,14 +696,20 @@ export function createComponentEditor(
               <label>
                 Layer
                 <select
+                  disabled={c.locked}
+                  aria-label="Component layer"
                   value={c.layerId}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const newLayerId = e.currentTarget.value;
                     update((v) => {
-                      v.layerId = e.currentTarget.value;
-                    })
-                  }
+                      v.layerId = newLayerId;
+                    });
+                    selectLayer(newLayerId);
+                  }}
                 >
-                  <For each={pcb()?.layers}>{(id) => <option>{id}</option>}</For>
+                  <For each={componentLayers(c.layerId)}>
+                    {(l) => <option value={l.id}>{l.label}</option>}
+                  </For>
                 </select>
               </label>
               <For each={["rotation", "scale"] as const}>
@@ -687,6 +722,7 @@ export function createComponentEditor(
                         step="0.1"
                         aria-label={`Component ${key}`}
                         value={c[key]}
+                        disabled={c.locked}
                         min={key === "scale" ? 0.001 : undefined}
                         onChange={(e) => {
                           const n = +e.currentTarget.value;
@@ -705,6 +741,7 @@ export function createComponentEditor(
                         class="component-step-btn"
                         aria-label={`Decrease component ${key}`}
                         title={`Decrease ${key}`}
+                        disabled={c.locked}
                         onClick={(e) => {
                           e.preventDefault();
                           const shift = e.shiftKey;
@@ -732,6 +769,7 @@ export function createComponentEditor(
                         class="component-step-btn"
                         aria-label={`Increase component ${key}`}
                         title={`Increase ${key}`}
+                        disabled={c.locked}
                         onClick={(e) => {
                           e.preventDefault();
                           const shift = e.shiftKey;
@@ -1066,7 +1104,7 @@ export function createComponentEditor(
           return true;
         }
         const next = copy(),
-          c = createInstance(next, armed()!, p, layer());
+          c = createInstance(next, armed()!, p, targetPlacementLayer(next));
         c.rotation = placementRotation();
         (next.components ??= []).push(c);
         ensureSchematic(next);
@@ -1167,7 +1205,7 @@ export function createComponentEditor(
       const ghost =
         armed() && pcb()?.pxPerMm
           ? (() => {
-              const c = createInstance(pcb()!, armed()!, cursor, layer());
+              const c = createInstance(pcb()!, armed()!, cursor, targetPlacementLayer());
               c.rotation = placementRotation();
               ctx.save();
               ctx.globalAlpha = 0.5;

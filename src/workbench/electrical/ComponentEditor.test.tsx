@@ -512,12 +512,20 @@ it("renders standardized component inspector details: capitalized labels, step 0
   expect(store.visual.activePcb()!.components![0].locked).toBe(true);
   expect(screen.getByRole("button", { name: "Locked" }).getAttribute("aria-pressed")).toBe("true");
 
+  expect((screen.getByLabelText("Component layer") as HTMLSelectElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Change footprint / symbol" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Decrease component rotation" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Increase component rotation" }) as HTMLButtonElement).disabled).toBe(true);
+
   const delBtn = screen.getByRole("button", { name: "Delete component" }) as HTMLButtonElement;
   expect(delBtn.disabled).toBe(true);
   expect(delBtn.title).toBe("Component is locked");
 
   fireEvent.click(screen.getByRole("button", { name: "Locked" }));
   expect(store.visual.activePcb()!.components![0].locked).toBe(false);
+
+  expect((screen.getByLabelText("Component layer") as HTMLSelectElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "Change footprint / symbol" }) as HTMLButtonElement).disabled).toBe(false);
 
   const changeFpBtn = screen.getByRole("button", { name: "Change footprint / symbol" });
   expect(changeFpBtn).toBeTruthy();
@@ -617,4 +625,44 @@ it("notifies errors with a small red badge button on the right and opens issues 
   const closeBtn = screen.getByRole("button", { name: "Close" });
   fireEvent.click(closeBtn);
   expect(screen.queryByRole("dialog", { name: "Component Issues" })).toBeNull();
+});
+
+it("renders component layer dropdown with front and back layers only and updates component layer", async () => {
+  const pcb = structuredClone(store.visual.activePcb()!);
+  const l1 = "layer-front-id";
+  const l2 = "layer-inner1-id";
+  const l3 = "layer-inner2-id";
+  const l4 = "layer-back-id";
+  pcb.layers = [l1, l2, l3, l4];
+  store.visual.replacePcb(pcb);
+
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+
+  const layerSelect = screen.getByLabelText("Component layer") as HTMLSelectElement;
+  expect(layerSelect).toBeTruthy();
+
+  // Must only show 2 options: Front and Back (inner layers excluded)
+  const options = Array.from(layerSelect.options);
+  expect(options).toHaveLength(2);
+  expect(options[0].value).toBe(l1);
+  expect(options[0].textContent).toBe("L1 — Front");
+  expect(options[1].value).toBe(l4);
+  expect(options[1].textContent).toBe("L4 — Back");
+
+  // Initial placement layer is L1 (Front)
+  expect(layerSelect.value).toBe(l1);
+  expect(store.visual.activePcb()!.components![0].layerId).toBe(l1);
+
+  // Switch to Back layer (L4)
+  fireEvent.change(layerSelect, { target: { value: l4 } });
+  expect(store.visual.activePcb()!.components![0].layerId).toBe(l4);
+  expect(layerSelect.value).toBe(l4);
+
+  // Switch back to Front layer (L1)
+  fireEvent.change(layerSelect, { target: { value: l1 } });
+  expect(store.visual.activePcb()!.components![0].layerId).toBe(l1);
+  expect(layerSelect.value).toBe(l1);
 });
