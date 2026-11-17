@@ -78,4 +78,20 @@ mod tests {
         assert_eq!(info.name, "PCB RE Studio");
         assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
     }
+
+    #[test]
+    fn app_icon_assets_exist_and_are_populated() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let icon_ico = manifest_dir.join("icons/icon.ico");
+        let icon_png = manifest_dir.join("icons/icon.png");
+        assert!(icon_ico.exists(), "icon.ico must exist");
+        assert!(icon_png.exists(), "icon.png must exist");
+        let ico_len = std::fs::metadata(&icon_ico).unwrap().len();
+        let png_len = std::fs::metadata(&icon_png).unwrap().len();
+        assert!(
+            ico_len > 1000,
+            "icon.ico must be a valid multi-res icon file"
+        );
+        assert!(png_len > 1000, "icon.png must be a high-res icon file");
+    }
 }
