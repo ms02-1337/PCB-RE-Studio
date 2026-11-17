@@ -212,7 +212,8 @@ export function ComponentManager(props: {
   const Preview = (p: { symbol?: boolean; title?: string }) => {
     const [zoom,setZoom]=createSignal(1), [pan,setPan]=createSignal({x:0,y:0}), [size,setSize]=createSignal({width:400,height:260});
     let canvas!: HTMLCanvasElement, surface!: HTMLDivElement;
-    let dragging: { id:number; x:number; y:number; pan:{x:number;y:number} } | undefined;
+    let dragging: { id:number; x:number; y:number; pan:{x:number;y:number}; moved:boolean } | undefined;
+    let didDrag = false;
     const bounds=createMemo(()=>libraryPreviewBounds(definition(),!!p.symbol));
     const fitted=()=>fitLibraryPreview(bounds(),size().width,size().height);
     const view=()=>{const f=fitted(), z=zoom(), center={x:size().width/2,y:size().height/2};return {scale:f.scale*z,x:center.x+(f.x-center.x)*z+pan().x,y:center.y+(f.y-center.y)*z+pan().y};};
@@ -293,16 +294,16 @@ export function ComponentManager(props: {
       <div class="component-preview-pane">
         <div class="component-preview-header">
           <h3>{p.title ?? (p.symbol ? (definition()?.symbol?.name ?? "Generic symbol") : (definition()?.footprint.name ?? "Footprint preview"))}</h3>
-          <button class="component-preview-fit" aria-label={p.symbol?"Fit symbol preview":"Fit footprint preview"} title="Fit preview; wheel to zoom; middle-drag to pan" onClick={reset}>Fit</button>
+          <button class="component-preview-fit" aria-label={p.symbol?"Fit symbol preview":"Fit footprint preview"} title="Fit preview; wheel to zoom; drag or middle-drag to pan" onClick={reset}>Fit</button>
         </div>
         <div ref={surface} class="component-preview-surface">
           <canvas ref={canvas} aria-label={p.symbol?"Symbol preview":"Footprint preview"}
             onWheel={e=>{e.preventDefault();const cursor=local(e), world=previewPoint(view(),cursor), next=Math.max(0.1,Math.min(30,zoom()*Math.exp(-e.deltaY*0.001)));setZoom(next);const mapping=view();setPan(current=>({x:current.x+cursor.x-(world.x*mapping.scale+mapping.x),y:current.y+cursor.y-(world.y*mapping.scale+mapping.y)}));}}
-            onPointerDown={e=>{if(e.button!==1)return;e.preventDefault();const cursor=local(e);dragging={id:e.pointerId,x:cursor.x,y:cursor.y,pan:pan()};canvas.setPointerCapture?.(e.pointerId);}}
-            onPointerMove={e=>{if(!dragging || dragging.id!==e.pointerId)return;const cursor=local(e);setPan({x:dragging.pan.x+cursor.x-dragging.x,y:dragging.pan.y+cursor.y-dragging.y});}}
+            onPointerDown={e=>{if(e.button!==0 && e.button!==1)return;e.preventDefault();const cursor=local(e);didDrag=false;dragging={id:e.pointerId,x:cursor.x,y:cursor.y,pan:pan(),moved:false};canvas.setPointerCapture?.(e.pointerId);}}
+            onPointerMove={e=>{if(!dragging || dragging.id!==e.pointerId)return;const cursor=local(e);const dx=cursor.x-dragging.x, dy=cursor.y-dragging.y;if(!dragging.moved && Math.hypot(dx,dy)>3){dragging.moved=true;didDrag=true;}setPan({x:dragging.pan.x+dx,y:dragging.pan.y+dy});}}
             onPointerUp={end} onPointerCancel={end} onLostPointerCapture={()=>{dragging=undefined;}}
             onAuxClick={e=>e.preventDefault()}
-            onClick={e=>{const d=definition();if(!d)return;const point=previewPoint(view(),local(e));if(p.symbol){const pins=d.symbol?.units.filter(u=>(u.unit===1||u.unit===0)&&(u.bodyStyle===1||u.bodyStyle===0)).flatMap(u=>u.pins)??[];const hit=pins.find(pin=>Math.hypot(pin.x-point.x,-pin.y-point.y)<2);if(hit)setSelectedPad(Object.keys(d.pinMap).find(n=>d.pinMap[n]===hit.number)??"");}else{const hit=d.footprint.pads.find(pad=>Math.hypot(pad.x-point.x,pad.y-point.y)<Math.max(pad.width,pad.height));if(hit)setSelectedPad(hit.number);}}}
+            onClick={e=>{if(didDrag){didDrag=false;return;}const d=definition();if(!d)return;const point=previewPoint(view(),local(e));if(p.symbol){const pins=d.symbol?.units.filter(u=>(u.unit===1||u.unit===0)&&(u.bodyStyle===1||u.bodyStyle===0)).flatMap(u=>u.pins)??[];const hit=pins.find(pin=>Math.hypot(pin.x-point.x,-pin.y-point.y)<2);if(hit)setSelectedPad(Object.keys(d.pinMap).find(n=>d.pinMap[n]===hit.number)??"");}else{const hit=d.footprint.pads.find(pad=>Math.hypot(pad.x-point.x,pad.y-point.y)<Math.max(pad.width,pad.height));if(hit)setSelectedPad(hit.number);}}}
           />
         </div>
       </div>

@@ -37,7 +37,34 @@ it("zooms and middle-drags each preview independently, and Fit resets its view",
  setup();const methods:Record<string,ReturnType<typeof vi.fn>>={};const ctx=new Proxy({} as CanvasRenderingContext2D,{get:(_,key)=>methods[String(key)]??=vi.fn(),set:()=>true});vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(ctx);
  const canvas=screen.getByLabelText("Footprint preview");fireEvent.wheel(canvas,{deltaY:-500,clientX:200,clientY:130});const zoomed=methods.scale.mock.calls[0][0],originalX=methods.translate.mock.calls[0][0];methods.scale.mockClear();methods.translate.mockClear();
  fireEvent.pointerDown(canvas,{button:1,clientX:200,clientY:130});fireEvent.pointerMove(canvas,{clientX:230,clientY:150});expect(methods.translate.mock.calls[0][0]).toBeCloseTo(originalX+30);fireEvent.pointerUp(canvas);methods.translate.mockClear();fireEvent.pointerMove(canvas,{clientX:300,clientY:180});expect(methods.translate).not.toHaveBeenCalled();
- methods.scale.mockClear();fireEvent.click(screen.getByRole("button",{name:"Fit footprint preview"}));expect(methods.scale.mock.calls[0][0]).toBeLessThan(zoomed);expect(screen.queryByLabelText("Preview symbol unit")).toBeNull();expect(screen.queryByLabelText("Preview body style")).toBeNull();
+ methods.scale.mockClear();
+ fireEvent.pointerDown(canvas,{button:0,clientX:200,clientY:130});fireEvent.pointerMove(canvas,{clientX:240,clientY:160});expect(methods.translate.mock.calls[0][0]).toBeCloseTo(originalX+40);fireEvent.pointerUp(canvas);methods.translate.mockClear();
+ fireEvent.click(screen.getByRole("button",{name:"Fit footprint preview"}));expect(methods.scale.mock.calls[0][0]).toBeLessThan(zoomed);expect(screen.queryByLabelText("Preview symbol unit")).toBeNull();expect(screen.queryByLabelText("Preview body style")).toBeNull();
+});
+
+it("pans preview with left-drag and suppresses click selection on drag release", () => {
+ vi.stubGlobal("PointerEvent", MouseEvent);
+ vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 260, width: 400, height: 260, toJSON() {} });
+ setup();
+ const methods: Record<string, ReturnType<typeof vi.fn>> = {};
+ const ctx = new Proxy({} as CanvasRenderingContext2D, { get: (_, key) => methods[String(key)] ??= vi.fn(), set: () => true });
+ vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(ctx);
+ const canvas = screen.getByLabelText("Footprint preview");
+ const padRow = screen.getByRole("row", { name: /1.*1/ });
+ expect(padRow.classList.contains("selected")).toBe(false);
+
+ // Left-drag pans and sets didDrag flag
+ fireEvent.pointerDown(canvas, { button: 0, clientX: 200, clientY: 130 });
+ fireEvent.pointerMove(canvas, { clientX: 240, clientY: 170 });
+ fireEvent.pointerUp(canvas);
+ fireEvent.click(canvas, { clientX: 240, clientY: 170 });
+ expect(padRow.classList.contains("selected")).toBe(false);
+
+ // Plain left-click without drag selects the pad
+ fireEvent.pointerDown(canvas, { button: 0, clientX: 200, clientY: 130 });
+ fireEvent.pointerUp(canvas);
+ fireEvent.click(canvas, { clientX: 200, clientY: 130 });
+ expect(padRow.classList.contains("selected")).toBe(true);
 });
 
 it("renders 3 columns in the pin table: Pad, Symbol pin, and NC checkbox which toggles ncPins", async () => {

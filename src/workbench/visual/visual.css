@@ -910,7 +910,8 @@
 .component-preview-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex:0 0 auto}
 .component-preview-header h3{margin:0;font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .component-preview-surface{position:relative;flex:1 1 0;min-height:0;overflow:hidden;background:var(--bg)}
-.component-manager .component-preview-surface canvas{position:absolute;inset:0;width:100%;height:100%;max-width:none;aspect-ratio:auto;object-fit:fill;touch-action:none}
+.component-manager .component-preview-surface canvas{position:absolute;inset:0;width:100%;height:100%;max-width:none;aspect-ratio:auto;object-fit:fill;touch-action:none;cursor:grab}
+.component-manager .component-preview-surface canvas:active{cursor:grabbing}
 .component-preview-fit{position:static;padding:2px 8px;font-size:11px;font-weight:500;height:24px;min-height:24px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:3px;cursor:pointer;flex-shrink:0}
 .component-preview-fit:hover{background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
 .component-manager .component-preview-stage>h3{flex:0 0 auto;margin:10px 0 6px;font-size:13px}
