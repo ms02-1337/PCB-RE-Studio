@@ -98,7 +98,16 @@
 .ve-settings-button .action-icon { margin-right:0; }
 /* Add-image lives in the Images heading (space-between with the h2 and the
    collapse chevron); margin-left:auto pushes it right, next to the chevron. */
-.ve-add-image { margin-left:auto; }
+.ve-heading-mirror-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+.ve-add-image {
+  margin-left: auto;
+  margin-right: 6px;
+}
 .ve-add-image .action-icon { margin-right:0; }
 .ve-settings-dialog { width:360px; max-width:100%; padding:0; }
 
