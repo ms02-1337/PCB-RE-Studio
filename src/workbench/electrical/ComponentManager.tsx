@@ -415,9 +415,6 @@ export function ComponentManager(props: {
             <Show when={step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span><div class="component-step-actions">          <Show when={!configuration() && step() !== "start"}><button class="component-step-btn component-step-back" disabled={busy()} onClick={back}>Back</button><button class="component-step-btn component-step-home" disabled={busy()} onClick={goToStart} title="Return to main screen">Main screen</button></Show>
           <Show when={!configuration() && (step() === "footprint" || step() === "symbol")}><button class="component-step-btn component-step-next" disabled={busy() || !definition() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length} onClick={() => navigate(step() === "footprint" ? "symbol" : "review")}>Next</button></Show>
 </div></nav></Show>
-            <Show when={step() === "review" && definition()}>{d => <div class="component-fields">
-              <For each={["name", "partName", "value", "referencePrefix"] as const}>{key => <label>{({ name: "Name", partName: "Part number", value: "Value", referencePrefix: "Reference prefix" })[key]}<input aria-label={`Component ${key}`} value={d()[key]} onInput={e => patch({ [key]: e.currentTarget.value })} /></label>}</For>
-            </div>}</Show>
             <div ref={region} class="component-workspace" data-resizable={step() === "footprint" || step() === "symbol"} style={{"--library-list-height":`${split().size}px`}}>
             <section hidden={!["saved","footprint","symbol"].includes(step())} class="component-browser" id="component-library-list" aria-label="Library browser">
               <div class="component-browser-controls">
@@ -477,85 +474,117 @@ export function ComponentManager(props: {
                     <Preview symbol title={definition()?.symbol?.name ?? "Generic symbol"} />
                   </div>
                   <Show when={step() === "review" && definition()}>
-                  <h3>Pin assignments</h3>
-                  <div class="component-pin-table"><table>
-                    <thead>
-                      <tr>
-                        <th class="col-pad">Pad</th>
-                        <th class="col-symbol-pin">Symbol pin</th>
-                        <th class="col-nc" title="Not connected (NC)">NC</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <For each={terminalNumbers(definition()!)}>
-                        {(number) => {
-                          const isNc = () => definition()!.ncPins?.includes(number) ?? false;
-                          return (
-                            <tr
-                              classList={{ selected: selectedPad() === number }}
-                              onClick={() => setSelectedPad(number)}
-                            >
-                              <td class="col-pad">{number}</td>
-                              <td class="col-symbol-pin">
-                                <select
-                                  aria-label={`Map pad ${number}`}
-                                  value={definition()!.pinMap[number] ?? ""}
-                                  onChange={(e) =>
-                                    patch({
-                                      pinMap: {
-                                        ...definition()!.pinMap,
-                                        [number]: e.currentTarget.value,
-                                      },
-                                    })
+                    {(d) => (
+                      <div class="component-review-bottom">
+                        <div class="component-review-info">
+                          <h3>Information</h3>
+                          <div class="component-fields">
+                            <For each={["name", "partName", "value", "referencePrefix"] as const}>
+                              {(key) => (
+                                <label>
+                                  {
+                                    ({
+                                      name: "Name",
+                                      partName: "Part number",
+                                      value: "Value",
+                                      referencePrefix: "Reference prefix",
+                                    })[key]
                                   }
-                                >
-                                  <option value="">Unmapped</option>
-                                  <For
-                                    each={[
-                                      ...new Map(
-                                        definition()?.symbol?.units
-                                          .flatMap((u) => u.pins)
-                                          .map((p) => [p.number, p]) ?? [],
-                                      ).values(),
-                                    ]}
-                                  >
-                                    {(p) => (
-                                      <option value={p.number}>
-                                        {p.number} - {p.name}
-                                      </option>
-                                    )}
-                                  </For>
-                                  <Show when={!definition()!.symbol}>
-                                    <option value={number}>{number}</option>
-                                  </Show>
-                                </select>
-                              </td>
-                              <td class="col-nc">
-                                <input
-                                  type="checkbox"
-                                  aria-label={`NC pad ${number}`}
-                                  title={`Not connected pad ${number}`}
-                                  checked={isNc()}
-                                  onChange={(e) => {
-                                    const checked = e.currentTarget.checked;
-                                    const currentNc = new Set(definition()!.ncPins ?? []);
-                                    if (checked) {
-                                      currentNc.add(number);
-                                    } else {
-                                      currentNc.delete(number);
-                                    }
-                                    patch({
-                                      ncPins: [...currentNc],
-                                    });
+                                  <input
+                                    aria-label={`Component ${key}`}
+                                    value={d()[key]}
+                                    onInput={(e) => patch({ [key]: e.currentTarget.value })}
+                                  />
+                                </label>
+                              )}
+                            </For>
+                          </div>
+                        </div>
+                        <div class="component-review-pins">
+                          <h3>Pin assignments</h3>
+                          <div class="component-pin-table">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th class="col-pad">Pad</th>
+                                  <th class="col-symbol-pin">Symbol pin</th>
+                                  <th class="col-nc" title="Not connected (NC)">NC</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <For each={terminalNumbers(definition()!)}>
+                                  {(number) => {
+                                    const isNc = () => definition()!.ncPins?.includes(number) ?? false;
+                                    return (
+                                      <tr
+                                        classList={{ selected: selectedPad() === number }}
+                                        onClick={() => setSelectedPad(number)}
+                                      >
+                                        <td class="col-pad">{number}</td>
+                                        <td class="col-symbol-pin">
+                                          <select
+                                            aria-label={`Map pad ${number}`}
+                                            value={definition()!.pinMap[number] ?? ""}
+                                            onChange={(e) =>
+                                              patch({
+                                                pinMap: {
+                                                  ...definition()!.pinMap,
+                                                  [number]: e.currentTarget.value,
+                                                },
+                                              })
+                                            }
+                                          >
+                                            <option value="">Unmapped</option>
+                                            <For
+                                              each={[
+                                                ...new Map(
+                                                  definition()?.symbol?.units
+                                                    .flatMap((u) => u.pins)
+                                                    .map((p) => [p.number, p]) ?? [],
+                                                ).values(),
+                                              ]}
+                                            >
+                                              {(p) => (
+                                                <option value={p.number}>
+                                                  {p.number} - {p.name}
+                                                </option>
+                                              )}
+                                            </For>
+                                            <Show when={!definition()!.symbol}>
+                                              <option value={number}>{number}</option>
+                                            </Show>
+                                          </select>
+                                        </td>
+                                        <td class="col-nc">
+                                          <input
+                                            type="checkbox"
+                                            aria-label={`NC pad ${number}`}
+                                            title={`Not connected pad ${number}`}
+                                            checked={isNc()}
+                                            onChange={(e) => {
+                                              const checked = e.currentTarget.checked;
+                                              const currentNc = new Set(definition()!.ncPins ?? []);
+                                              if (checked) {
+                                                currentNc.add(number);
+                                              } else {
+                                                currentNc.delete(number);
+                                              }
+                                              patch({
+                                                ncPins: [...currentNc],
+                                              });
+                                            }}
+                                          />
+                                        </td>
+                                      </tr>
+                                    );
                                   }}
-                                />
-                              </td>
-                            </tr>
-                          );
-                        }}
-                      </For>
-                    </tbody>
-                  </table></div>
+                                </For>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </Show>
                 </div>
               )}

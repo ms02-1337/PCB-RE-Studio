@@ -40,7 +40,68 @@ it("zooms and middle-drags each preview independently, and Fit resets its view",
  methods.scale.mockClear();fireEvent.click(screen.getByRole("button",{name:"Fit footprint preview"}));expect(methods.scale.mock.calls[0][0]).toBeLessThan(zoomed);expect(screen.queryByLabelText("Preview symbol unit")).toBeNull();expect(screen.queryByLabelText("Preview body style")).toBeNull();
 });
 
-it("renders saved components with Name, Footprint, Symbol, Actions and prevents deleting in-use components",async()=>{setup(undefined,null,(d)=>d.id==="d");fireEvent.click(screen.getByRole("button",{name:"Use saved component"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Load"})).toBeTruthy());const table=screen.getByRole("table");expect(within(table).getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Name","Footprint","Symbol","Actions"]);const row=screen.getByRole("button",{name:"Load"}).closest("tr")!;const cells=within(row).getAllByRole("cell");expect(cells[0].textContent).toBe("Connector");expect(cells[1].textContent).toBe("Connector footprint");expect(cells[2].textContent).toBe("Generic");expect(within(cells[3]).getAllByRole("button")).toHaveLength(3);const deleteBtn=screen.getByRole("button",{name:"Delete Connector"}) as HTMLButtonElement;expect(deleteBtn.disabled).toBe(true);expect(deleteBtn.getAttribute("title")).toBe("Cannot delete: component is in use on the board");expect(screen.queryByRole("separator")).toBeNull();});
+it("renders 3 columns in the pin table: Pad, Symbol pin, and NC checkbox which toggles ncPins", async () => {
+  const place = setup();
+  vi.spyOn(kicad, "saveDefinition").mockResolvedValue();
+  const table = screen.getByRole("table");
+  const headers = within(table).getAllByRole("columnheader");
+  expect(headers.map((h) => h.textContent)).toEqual(["Pad", "Symbol pin", "NC"]);
+  expect(headers[0].classList.contains("col-pad")).toBe(true);
+  expect(headers[1].classList.contains("col-symbol-pin")).toBe(true);
+  expect(headers[2].classList.contains("col-nc")).toBe(true);
+  expect(headers[2].getAttribute("title")).toContain("Not connected");
+
+  const ncCheckbox = screen.getByRole("checkbox", { name: "NC pad 1" }) as HTMLInputElement;
+  expect(ncCheckbox).toBeTruthy();
+  expect(ncCheckbox.checked).toBe(false);
+
+  fireEvent.click(ncCheckbox);
+  expect(ncCheckbox.checked).toBe(true);
+
+  const saveBtn = screen.getByRole("button", { name: "Place" });
+  fireEvent.click(saveBtn);
+  await waitFor(() => expect(place).toHaveBeenCalled());
+  const placedDef: ComponentDefinition = place.mock.calls[0][0];
+  expect(placedDef.ncPins).toEqual(["1"]);
+
+  fireEvent.click(ncCheckbox);
+  expect(ncCheckbox.checked).toBe(false);
+});
+
+it("renders review step with information on the left and pin assignments on the right", () => {
+  setup();
+  const bottom = document.querySelector(".component-review-bottom") as HTMLElement;
+  expect(bottom).toBeTruthy();
+  const info = bottom.querySelector(".component-review-info") as HTMLElement;
+  const pins = bottom.querySelector(".component-review-pins") as HTMLElement;
+  expect(info).toBeTruthy();
+  expect(pins).toBeTruthy();
+  expect(within(info).getByLabelText("Component name")).toBeTruthy();
+  expect(within(info).getByLabelText("Component partName")).toBeTruthy();
+  expect(within(info).getByLabelText("Component value")).toBeTruthy();
+  expect(within(info).getByLabelText("Component referencePrefix")).toBeTruthy();
+  expect(within(pins).getByRole("table")).toBeTruthy();
+  expect(within(pins).getByRole("heading", { name: "Pin assignments" })).toBeTruthy();
+});
+
+it("renders footprint and symbol library browser with col-name, centered col-source and centered col-actions", async () => {
+  setup(undefined, null);
+  fireEvent.click(screen.getByRole("button", { name: "Create new component" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Use footprint" })).toBeTruthy());
+  const table = screen.getByRole("table");
+  const headers = within(table).getAllByRole("columnheader");
+  expect(headers.map((h) => h.textContent)).toEqual(["Name", "Source", "Actions"]);
+  expect(headers[0].classList.contains("col-name")).toBe(true);
+  expect(headers[1].classList.contains("col-source")).toBe(true);
+  expect(headers[2].classList.contains("col-actions")).toBe(true);
+  const row = screen.getByRole("button", { name: "Use footprint" }).closest("tr")!;
+  const cells = within(row).getAllByRole("cell");
+  expect(cells[0].classList.contains("col-name")).toBe(true);
+  expect(cells[1].classList.contains("col-source")).toBe(true);
+  expect(cells[2].classList.contains("col-actions")).toBe(true);
+});
+
+it("renders saved components with Name, Footprint, Symbol, Actions and prevents deleting in-use components",async()=>{setup(undefined,null,(d)=>d.id==="d");fireEvent.click(screen.getByRole("button",{name:"Use saved component"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Load"})).toBeTruthy());const table=screen.getByRole("table");expect(within(table).getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Name","Footprint","Symbol","Actions"]);const headers=within(table).getAllByRole("columnheader");expect(headers[0].classList.contains("col-name")).toBe(true);expect(headers[1].classList.contains("col-footprint")).toBe(true);expect(headers[2].classList.contains("col-symbol")).toBe(true);expect(headers[3].classList.contains("col-actions")).toBe(true);const row=screen.getByRole("button",{name:"Load"}).closest("tr")!;const cells=within(row).getAllByRole("cell");expect(cells[0].textContent).toBe("Connector");expect(cells[0].classList.contains("col-name")).toBe(true);expect(cells[1].textContent).toBe("Connector footprint");expect(cells[1].classList.contains("col-footprint")).toBe(true);expect(cells[2].textContent).toBe("Generic");expect(cells[2].classList.contains("col-symbol")).toBe(true);expect(cells[3].classList.contains("col-actions")).toBe(true);expect(within(cells[3]).getAllByRole("button")).toHaveLength(3);const deleteBtn=screen.getByRole("button",{name:"Delete Connector"}) as HTMLButtonElement;expect(deleteBtn.disabled).toBe(true);expect(deleteBtn.getAttribute("title")).toBe("Cannot delete: component is in use on the board");expect(screen.queryByRole("separator")).toBeNull();});
 it("resizes creation panels by keyboard and captured pointer, restores cancellation and retains ratio",async()=>{
  vi.stubGlobal("PointerEvent",class extends MouseEvent{pointerId:number;constructor(type:string,init:PointerEventInit){super(type,init);this.pointerId=init.pointerId??1;}});
  setup(undefined,null);fireEvent.click(screen.getByRole("button",{name:"Create new component"}));const splitter=screen.getByRole("separator",{name:"Resize library list and previews"});const capture=vi.fn(),release=vi.fn();Object.assign(splitter,{setPointerCapture:capture,hasPointerCapture:()=>true,releasePointerCapture:release});

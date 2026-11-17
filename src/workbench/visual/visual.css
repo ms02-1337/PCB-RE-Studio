@@ -914,7 +914,60 @@
 .component-preview-fit{position:static;padding:2px 8px;font-size:11px;font-weight:500;height:24px;min-height:24px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:3px;cursor:pointer;flex-shrink:0}
 .component-preview-fit:hover{background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
 .component-manager .component-preview-stage>h3{flex:0 0 auto;margin:10px 0 6px;font-size:13px}
+.component-review-bottom {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 10px;
+  min-height: 0;
+  flex: 0 1 auto;
+}
+.component-review-info,
+.component-review-pins {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.component-review-info h3,
+.component-review-pins h3 {
+  flex: 0 0 auto;
+  margin: 6px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.component-review-info .component-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+.component-review-info .component-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.component-review-info .component-fields input {
+  height: 28px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
 .component-manager .component-pin-table{flex:0 1 26%;min-height:75px;max-height:200px;overflow:auto;border:1px solid var(--border);background:var(--bg)}
+.component-manager .component-review-pins .component-pin-table {
+  flex: 1 1 auto;
+  min-height: 80px;
+  max-height: 200px;
+}
+@media (max-width: 768px) {
+  .component-review-bottom {
+    grid-template-columns: 1fr;
+  }
+}
 .component-pin-table table {
   width: 100%;
   border-collapse: collapse;
