@@ -182,6 +182,8 @@ it("cancels conflicting wires unchanged and commits accepted joins as one undo e
   await store.openProject("schematic.pcbre");
   store.configureAutosave({ enabled: false, delayMs: 2000 });
   render(() => <SchematicPanel store={store} active />);
+  expect(screen.getByRole("heading", { name: "Schematic" })).toBeTruthy();
+  expect(document.querySelector(".electrical-separator")).toBeTruthy();
   const svg = screen.getByLabelText("Schematic canvas");
   vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
     x: 0,
@@ -308,6 +310,8 @@ it("adds and removes mid-wire joints with one undo entry each", async () => {
   await store.openProject("joints.pcbre");
   store.configureAutosave({ enabled: false, delayMs: 2000 });
   render(() => <SchematicPanel store={store} active />);
+  expect(screen.getByRole("heading", { name: "Schematic" })).toBeTruthy();
+  expect(document.querySelector(".electrical-separator")).toBeTruthy();
   const svg = screen.getByLabelText("Schematic canvas");
   vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
     x: 0,
@@ -326,9 +330,16 @@ it("adds and removes mid-wire joints with one undo entry each", async () => {
   const points = () => store.visual.activePcb()?.schematic?.wires[0].points;
   const before = JSON.stringify(store.visual.activePcb());
   expect(screen.getByRole("button", { name: "Wire bend 1" })).toBeTruthy();
-  fireEvent.pointerDown(
-    screen.getByRole("button", { name: "Add joint on segment 1" }),
-  );
+  // Midpoint + buttons are removed; right-click menu on the wire provides "Add joint".
+  expect(screen.queryAllByRole("button", { name: /^Add joint on segment/ })).toHaveLength(0);
+  fireEvent.contextMenu(polyline as SVGPolylineElement, {
+    clientX: 0,
+    clientY: 10,
+  });
+  const addJointItem = screen.getByRole("menuitem", { name: "Add joint" });
+  expect(addJointItem).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "Delete wire" })).toBeTruthy();
+  fireEvent.click(addJointItem);
   expect(points()).toEqual([
     { x: 0, y: 0 },
     { x: 0, y: 10 },
@@ -336,13 +347,6 @@ it("adds and removes mid-wire joints with one undo entry each", async () => {
     { x: 30, y: 20 },
   ]);
   expect(screen.getByRole("button", { name: "Wire bend 2" })).toBeTruthy();
-  store.undo();
-  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
-  fireEvent.keyDown(
-    screen.getByRole("button", { name: "Add joint on segment 2" }),
-    { key: "Enter" },
-  );
-  expect(points()).toHaveLength(4);
   store.undo();
   expect(JSON.stringify(store.visual.activePcb())).toBe(before);
   fireEvent.dblClick(screen.getByRole("button", { name: "Wire bend 1" }));
@@ -359,37 +363,34 @@ it("adds and removes mid-wire joints with one undo entry each", async () => {
   expect(points()).toHaveLength(3);
   store.undo();
   expect(JSON.stringify(store.visual.activePcb())).toBe(before);
-  // Right-click on the wire splits it at the clicked point and selects it.
-  fireEvent.contextMenu(svg.querySelector("polyline")!, {
-    clientX: 0,
-    clientY: 10,
-  });
-  expect(points()).toEqual([
-    { x: 0, y: 0 },
-    { x: 0, y: 10 },
-    { x: 0, y: 20 },
-    { x: 30, y: 20 },
-  ]);
-  expect(screen.getByRole("button", { name: "Wire bend 2" })).toBeTruthy();
-  store.undo();
-  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
-  // Right-click on an existing vertex adds nothing.
-  fireEvent.contextMenu(svg.querySelector("polyline")!, {
-    clientX: 0,
-    clientY: 20,
-  });
-  expect(points()).toEqual([
-    { x: 0, y: 0 },
-    { x: 0, y: 20 },
-    { x: 30, y: 20 },
-  ]);
-  // Right-click on a bend removes it.
+  // Right-click on a bend shows a menu with "Delete joint".
   fireEvent.contextMenu(screen.getByRole("button", { name: "Wire bend 1" }));
+  const deleteJointItem = screen.getByRole("menuitem", { name: "Delete joint" });
+  expect(deleteJointItem).toBeTruthy();
+  fireEvent.click(deleteJointItem);
   expect(points()).toEqual([
     { x: 0, y: 0 },
     { x: 30, y: 0 },
     { x: 30, y: 20 },
   ]);
+  store.undo();
+  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
+  // ContextMenu key on a bend opens the context menu as well.
+  fireEvent.keyDown(screen.getByRole("button", { name: "Wire bend 1" }), {
+    key: "ContextMenu",
+  });
+  expect(screen.getByRole("menuitem", { name: "Delete joint" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete joint" }));
+  expect(points()).toHaveLength(3);
+  store.undo();
+  expect(JSON.stringify(store.visual.activePcb())).toBe(before);
+  // Context menu "Delete wire" removes the whole wire.
+  fireEvent.contextMenu(svg.querySelector("polyline")!, {
+    clientX: 0,
+    clientY: 10,
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete wire" }));
+  expect(store.visual.activePcb()?.schematic?.wires).toHaveLength(0);
   store.undo();
   expect(JSON.stringify(store.visual.activePcb())).toBe(before);
   // A right-drag pan does not edit wires through the trailing contextmenu.
@@ -400,6 +401,7 @@ it("adds and removes mid-wire joints with one undo entry each", async () => {
     clientX: 0,
     clientY: 10,
   });
+  expect(screen.queryByRole("menu")).toBeNull();
   expect(points()).toEqual([
     { x: 0, y: 0 },
     { x: 0, y: 20 },
@@ -460,6 +462,8 @@ it("renders joint handles only for the selected wire", async () => {
   await store.openProject("joints.pcbre");
   store.configureAutosave({ enabled: false, delayMs: 2000 });
   render(() => <SchematicPanel store={store} active />);
+  expect(screen.getByRole("heading", { name: "Schematic" })).toBeTruthy();
+  expect(document.querySelector(".electrical-separator")).toBeTruthy();
   const svg = screen.getByLabelText("Schematic canvas");
   vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
     x: 0,
@@ -473,12 +477,17 @@ it("renders joint handles only for the selected wire", async () => {
     toJSON() {},
   });
   fireEvent.pointerDown(svg.querySelector("polyline")!, { button: 0 });
-  expect(screen.getAllByRole("button", { name: /^Add joint/ })).toHaveLength(2);
+  expect(screen.queryAllByRole("button", { name: /^Add joint/ })).toHaveLength(0);
   expect(screen.getAllByRole("button", { name: /^Wire bend/ })).toHaveLength(1);
   expect(
     screen
       .getByRole("button", { name: "Wire bend 1" })
       .getAttribute("width"),
-  ).toBe("1");
+  ).toBe("0.6");
+  expect(
+    screen
+      .getByRole("button", { name: "Wire bend 1" })
+      .getAttribute("height"),
+  ).toBe("0.6");
   store.dispose();
 });

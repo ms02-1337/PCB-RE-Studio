@@ -431,7 +431,7 @@
 }
 .schematic-bend:focus-visible {
   stroke: var(--focus);
-  stroke-width: 0.4;
+  stroke-width: 0.25;
 }
 .schematic-joint-add circle {
   fill: var(--surface);

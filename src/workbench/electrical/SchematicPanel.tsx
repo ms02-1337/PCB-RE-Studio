@@ -20,6 +20,7 @@ import type {
 } from "./model";
 import { exportSchematicPackage } from "./schematicExport";
 import { assignTerminalNet } from "./actions";
+import { ContextMenu, type MenuItem } from "../placement/ContextMenu";
 import "./electrical.css";
 
 export const emptySchematic = (): SchematicDocument => ({
@@ -283,6 +284,11 @@ export function SchematicPanel(props: {
     id: string;
     points: Point[];
   } | null>(null);
+  const [contextMenu, setContextMenu] = createSignal<{
+    x: number;
+    y: number;
+    items: MenuItem[];
+  } | null>(null);
   let wireDrag: { previous: VisualPcb; id: string; index: number } | null =
     null;
   let startAnchor: WireAnchor | undefined;
@@ -322,6 +328,7 @@ export function SchematicPanel(props: {
     routeOrigin = undefined;
     wireDrag = null;
     setWireDraft(null);
+    setContextMenu(null);
   };
   createEffect(
     on([pcb, () => props.active, () => props.store.projectSession()], () => {
@@ -808,38 +815,20 @@ export function SchematicPanel(props: {
           else u.flip = !u.flip;
         }
     });
+  const deleteWire = (id: string) => {
+    edit((p) => {
+      if (p.schematic)
+        p.schematic.wires = p.schematic.wires.filter((w) => w.id !== id);
+    });
+    if (selectedWire() === id) setSelectedWire("");
+  };
   const remove = () => {
     if (selectedWire()) {
-      edit((p) => {
-        if (p.schematic)
-          p.schematic.wires = p.schematic.wires.filter(
-            (w) => w.id !== selectedWire(),
-          );
-      });
-      setSelectedWire("");
+      deleteWire(selectedWire());
     } else
       setMessage(
         "Components remain shared with the PCB. Delete them in the Visual editor; move their units here.",
       );
-  };
-  const addJoint = (seg: number) => {
-    const previous = pcb(),
-      w = doc().wires.find((x) => x.id === selectedWire());
-    if (!previous || !w) return;
-    const resolved = resolveWireGeometry(previous, w);
-    if (seg < 0 || seg + 2 > resolved.length) return;
-    const a = resolved[seg],
-      b = resolved[seg + 1];
-    if (distance(a, b) < 1e-6) return;
-    const next = structuredClone(previous);
-    next.schematic ??= emptySchematic();
-    const target = next.schematic.wires.find((x) => x.id === w.id);
-    if (!target) return;
-    resolved.splice(seg + 1, 0, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-    target.points = resolved.flatMap((p, i) =>
-      i ? orthogonal(resolved[i - 1], p).slice(1) : [p],
-    );
-    commitWires(previous, next, wireGroup(next.schematic.wires, target.id));
   };
   // Splits the wire at an arbitrary clicked position: the point projects onto
   // the nearest segment and becomes a movable interior joint.
@@ -1030,6 +1019,7 @@ export function SchematicPanel(props: {
     <section class="electrical-panel" aria-label="Schematic editor">
       <div class="electrical-toolbar">
         <h1>Schematic</h1>
+        <span class="electrical-separator" aria-hidden="true" />
         <label>
           PCB{" "}
           <select
@@ -1231,7 +1221,23 @@ export function SchematicPanel(props: {
                   e.preventDefault();
                   e.stopPropagation();
                   if (tool() !== "select" || !contextJointOk()) return;
-                  addJointAt(w.id, coordinates(e));
+                  setSelected([]);
+                  setSelectedWire(w.id);
+                  const coords = coordinates(e);
+                  setContextMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    items: [
+                      {
+                        label: "Add joint",
+                        run: () => addJointAt(w.id, coords),
+                      },
+                      {
+                        label: "Delete wire",
+                        run: () => deleteWire(w.id),
+                      },
+                    ],
+                  });
                 }}
               />
             )}
@@ -1244,10 +1250,10 @@ export function SchematicPanel(props: {
                   role="button"
                   tabindex="0"
                   aria-label={`Wire bend ${i() + 1}`}
-                  x={p.x - 0.5}
-                  y={p.y - 0.5}
-                  width="1"
-                  height="1"
+                  x={p.x - 0.3}
+                  y={p.y - 0.3}
+                  width="0.6"
+                  height="0.6"
                   fill="var(--accent)"
                   onPointerDown={(e) => {
                     e.stopPropagation();
@@ -1267,47 +1273,51 @@ export function SchematicPanel(props: {
                     e.preventDefault();
                     e.stopPropagation();
                     if (!contextJointOk()) return;
-                    removeJoint(i());
+                    const jointIndex = i();
+                    setContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      items: [
+                        {
+                          label: "Delete joint",
+                          run: () => removeJoint(jointIndex),
+                        },
+                      ],
+                    });
                   }}
                   onKeyDown={(e) => {
-                    if (["Delete", "Backspace", "Enter", " "].includes(e.key)) {
+                    if (["Delete", "Backspace"].includes(e.key)) {
                       e.preventDefault();
                       e.stopPropagation();
                       removeJoint(i());
+                    } else if (
+                      e.key === "ContextMenu" ||
+                      (e.shiftKey && e.key === "F10")
+                    ) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = (
+                        e.currentTarget as SVGElement
+                      ).getBoundingClientRect();
+                      const jointIndex = i();
+                      setContextMenu({
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+                        items: [
+                          {
+                            label: "Delete joint",
+                            run: () => removeJoint(jointIndex),
+                          },
+                        ],
+                      });
                     }
                   }}
                 >
                   <title>
-                    Drag to move; double-click, right-click, or press Delete to
+                    Drag to move; right-click, double-click, or press Delete to
                     remove
                   </title>
                 </rect>
-              )}
-            </For>
-            <For each={segmentMidpoints(selectedWirePoints())}>
-              {(m) => (
-                <g
-                  class="schematic-joint-add"
-                  role="button"
-                  tabindex="0"
-                  aria-label={`Add joint on segment ${m.seg + 1}`}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    addJoint(m.seg);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      addJoint(m.seg);
-                    }
-                  }}
-                >
-                  <circle cx={m.x} cy={m.y} r="0.9" />
-                  <path
-                    d={`M ${m.x - 0.45} ${m.y} H ${m.x + 0.45} M ${m.x} ${m.y - 0.45} V ${m.y + 0.45}`}
-                  />
-                </g>
               )}
             </For>
           </Show>
@@ -1510,6 +1520,17 @@ export function SchematicPanel(props: {
             />
           </Show>
         </svg>
+        <Show when={contextMenu()} keyed>
+          {(menu) => (
+            <ContextMenu
+              x={menu.x}
+              y={menu.y}
+              items={menu.items}
+              onClose={() => setContextMenu(null)}
+              restoreFocus={(svg as unknown as HTMLElement) ?? null}
+            />
+          )}
+        </Show>
         <aside class="schematic-inspector">
           <h2>Selection details</h2>
           <Show when={selectedComponent()} keyed>
