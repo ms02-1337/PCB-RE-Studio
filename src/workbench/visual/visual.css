@@ -1017,12 +1017,39 @@
 .component-workspace[data-resizable="true"]>.component-preview-stage{min-height:200px}
 @media(max-height:650px){.component-workspace[data-resizable="true"]{flex:0 0 auto;height:500px;min-height:328px}}
 
-.component-confirm-dialog{min-width:320px;max-width:440px;padding:18px 20px;background:var(--surface,#1e1e1e);border:1px solid var(--border);border-radius:6px;box-shadow:0 12px 32px rgba(0,0,0,.6)}
-.component-confirm-dialog .dialog-header h2{font-size:15px;font-weight:600;margin:0 0 8px;color:var(--text)}
-.component-confirm-dialog .dialog-content p{font-size:13px;color:var(--muted,#aaa);margin:0 0 16px;line-height:1.4}
-.component-confirm-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:10px;padding:0;background:transparent;border-top:0}
-.component-confirm-dialog .component-discard-btn{background:var(--danger,#e5484d);border:1px solid var(--danger,#e5484d);color:#fff;font-weight:500;border-radius:4px;padding:6px 14px;cursor:pointer;text-align:center}
-.component-confirm-dialog .component-discard-btn:hover{filter:brightness(1.12)}
+.component-confirm-dialog {
+  width: 400px;
+  max-width: 90vw;
+  padding: 0;
+}
+.component-confirm-dialog .dialog-content p {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.component-confirm-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 16px;
+  margin-top: 4px;
+}
+.component-confirm-dialog .component-discard-btn {
+  /* Standard secondary/neutral button like other modals */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 6px 14px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.component-confirm-dialog .component-discard-btn:hover {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--focus, #ffcd11);
+}
 
 .library-source-field{display:flex;flex-direction:column;gap:6px;margin:14px 0;max-width:none}
 .library-path-label{font-size:12px;color:var(--muted)}
