@@ -1,5 +1,5 @@
 import { electricalMembers } from "./actions";
-import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import { createSignal, createEffect, createMemo, onCleanup, For, Show } from "solid-js";
 import type { PlacementStore } from "../placement/store";
 import type { Point } from "../placement/projectDoc";
 import type { ComponentDefinition } from "../../bridge/kicad";
@@ -333,6 +333,10 @@ export function createComponentEditor(
       }) => {
         const [open, setOpen] = createSignal(false);
         const [filter, setFilter] = createSignal("");
+        const [dropUp, setDropUp] = createSignal(false);
+        const [dropdownMaxHeight, setDropdownMaxHeight] = createSignal(160);
+        let inputRef: HTMLInputElement | undefined;
+
         const markings = () => store.doc()?.components ?? [];
         const currentMarking = () =>
           markings().find((m) => m.id === props.value());
@@ -345,6 +349,40 @@ export function createComponentEditor(
               (m.partNumber && m.partNumber.toLowerCase().includes(q)) ||
               (m.value && m.value.toLowerCase().includes(q)),
           );
+        };
+
+        const updatePlacement = () => {
+          if (!inputRef) return;
+          const rect = inputRef.getBoundingClientRect();
+          const inspector =
+            inputRef.closest(".component-inspector") ??
+            inputRef.closest(".ve-sidebar");
+          const bounds = inspector
+            ? inspector.getBoundingClientRect()
+            : { top: 0, bottom: window.innerHeight || 800 };
+
+          if (bounds.bottom === 0 && bounds.top === 0) {
+            setDropUp(false);
+            setDropdownMaxHeight(160);
+            return;
+          }
+
+          const spaceBelow = Math.max(0, bounds.bottom - rect.bottom - 12);
+          const spaceAbove = Math.max(0, rect.top - bounds.top - 12);
+
+          if (spaceBelow < 120 && spaceAbove > spaceBelow) {
+            setDropUp(true);
+            setDropdownMaxHeight(Math.max(80, Math.min(180, Math.floor(spaceAbove))));
+          } else {
+            setDropUp(false);
+            setDropdownMaxHeight(Math.max(80, Math.min(180, Math.floor(spaceBelow))));
+          }
+        };
+
+        const openDropdown = () => {
+          updatePlacement();
+          setOpen(true);
+          setFilter("");
         };
 
         const handleSelect = (id: string | undefined) => {
@@ -368,6 +406,7 @@ export function createComponentEditor(
             </div>
             <div class="ve-net-input-bar">
               <input
+                ref={inputRef}
                 type="text"
                 role="combobox"
                 aria-label="Board mapping link"
@@ -379,19 +418,21 @@ export function createComponentEditor(
                 value={open() ? filter() : (currentMarking()?.refdes ?? "")}
                 onClick={() => {
                   if (!open()) {
-                    setOpen(true);
-                    setFilter("");
+                    openDropdown();
                   }
                 }}
                 onFocus={() => {
                   if (!open()) {
-                    setOpen(true);
-                    setFilter("");
+                    openDropdown();
                   }
                 }}
                 onInput={(e) => {
                   setFilter(e.currentTarget.value);
-                  if (!open()) setOpen(true);
+                  if (!open()) {
+                    openDropdown();
+                  } else {
+                    updatePlacement();
+                  }
                 }}
                 onChange={(e) => {
                   const val = e.currentTarget.value.trim();
@@ -446,6 +487,22 @@ export function createComponentEditor(
                 class="ve-net-dropdown"
                 role="listbox"
                 aria-label="Board mapping components list"
+                style={{
+                  ...(dropUp()
+                    ? {
+                        bottom: "100%",
+                        top: "auto",
+                        "margin-bottom": "3px",
+                        "margin-top": "0",
+                      }
+                    : {
+                        top: "100%",
+                        bottom: "auto",
+                        "margin-top": "3px",
+                        "margin-bottom": "0",
+                      }),
+                  "max-height": `${dropdownMaxHeight()}px`,
+                }}
               >
                 <button
                   type="button"
@@ -502,16 +559,61 @@ export function createComponentEditor(
         scale: "Scale",
       } as const;
 
+      const [showIssues, setShowIssues] = createSignal(false);
+      createEffect(() => {
+        if (showIssues()) {
+          const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setShowIssues(false);
+            }
+          };
+          window.addEventListener("keydown", onKey, true);
+          onCleanup(() => window.removeEventListener("keydown", onKey, true));
+        }
+      });
+
+      const componentIssues = () => {
+        const issues: string[] = [];
+        const err = error();
+        if (err) issues.push(err);
+        const oNotice = overlapNotice();
+        if (oNotice) {
+          for (const item of oNotice.split("; ")) {
+            if (item.trim()) issues.push(item.trim());
+          }
+        }
+        const comp = current();
+        if (comp) {
+          for (const d of comp.definition.footprint.diagnostics ?? []) {
+            issues.push(`Footprint: ${d}`);
+          }
+          for (const d of comp.definition.symbol?.diagnostics ?? []) {
+            issues.push(`Symbol: ${d}`);
+          }
+        }
+        return issues;
+      };
+
       return (
         <Show when={current()} keyed>
           {(c) => (
             <div class="component-inspector">
-              <h3>Component</h3>
-              <Show when={overlapNotice()}>
-                <p class="component-overlap" role="status">
-                  {overlapNotice()}
-                </p>
-              </Show>
+              <div class="component-inspector-title-row">
+                <h3>Component</h3>
+                <Show when={componentIssues().length > 0}>
+                  <button
+                    type="button"
+                    class="component-issue-btn"
+                    aria-label={`Component issues (${componentIssues().length})`}
+                    title={`${componentIssues().length} issue${componentIssues().length > 1 ? "s" : ""}. Click to view details.`}
+                    onClick={() => setShowIssues(true)}
+                  >
+                    <ActionIcon name="alert" />
+                    <span>{componentIssues().length}</span>
+                  </button>
+                </Show>
+              </div>
               <For each={["reference", "value", "partName"] as const}>
                 {(key) => (
                   <label>
@@ -539,11 +641,29 @@ export function createComponentEditor(
                   </label>
                 )}
               </For>
-              <p>Footprint: {c.definition.footprint.name}</p>
-              <p>Symbol: {c.definition.symbol?.name ?? "Generic - unresolved"}</p>
-              <button onClick={() => open([c.id])}>
-                Change footprint / symbol
-              </button>
+              <div class="component-footprint-row">
+                <p class="component-footprint-text">
+                  Footprint:{" "}
+                  <strong
+                    class="component-footprint-name"
+                    title={c.definition.footprint.name}
+                  >
+                    {c.definition.footprint.name}
+                  </strong>
+                </p>
+                <button
+                  type="button"
+                  class="component-action-icon-btn"
+                  aria-label="Change footprint / symbol"
+                  title="Change footprint / symbol"
+                  onClick={() => open([c.id])}
+                >
+                  <ActionIcon name="replace" />
+                </button>
+              </div>
+              <p class="component-symbol-text">
+                Symbol: {c.definition.symbol?.name ?? "Generic - unresolved"}
+              </p>
               <label>
                 Layer
                 <select
@@ -559,26 +679,82 @@ export function createComponentEditor(
               </label>
               <For each={["rotation", "scale"] as const}>
                 {(key) => (
-                  <label>
-                    {numericLabels[key]}
-                    <input
-                      type="number"
-                      step="0.1"
-                      aria-label={`Component ${key}`}
-                      value={c[key]}
-                      min={key === "scale" ? 0.001 : undefined}
-                      onChange={(e) => {
-                        const n = +e.currentTarget.value;
-                        if (!Number.isFinite(n) || (key === "scale" && n <= 0))
-                          return;
-                        update((v, next) => {
-                          const old = structuredClone(v);
-                          v[key] =
-                            key === "rotation" ? ((n % 360) + 360) % 360 : n;
-                          moveAttached(old, v, next);
-                        });
-                      }}
-                    />
+                  <label class="component-numeric-field">
+                    <span class="component-numeric-label">{numericLabels[key]}</span>
+                    <div class="component-numeric-row">
+                      <input
+                        type="number"
+                        step="0.1"
+                        aria-label={`Component ${key}`}
+                        value={c[key]}
+                        min={key === "scale" ? 0.001 : undefined}
+                        onChange={(e) => {
+                          const n = +e.currentTarget.value;
+                          if (!Number.isFinite(n) || (key === "scale" && n <= 0))
+                            return;
+                          update((v, next) => {
+                            const old = structuredClone(v);
+                            v[key] =
+                              key === "rotation" ? ((n % 360) + 360) % 360 : n;
+                            moveAttached(old, v, next);
+                          });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        class="component-step-btn"
+                        aria-label={`Decrease component ${key}`}
+                        title={`Decrease ${key}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const shift = e.shiftKey;
+                          update((v, next) => {
+                            const currentVal = v[key];
+                            const step = key === "rotation" ? (shift ? 15 : 1) : (shift ? 0.5 : 0.1);
+                            let nextVal: number;
+                            if (key === "rotation") {
+                              const raw = currentVal - step;
+                              nextVal = Math.round((((raw % 360) + 360) % 360) * 10) / 10;
+                            } else {
+                              const raw = Math.max(0.001, currentVal - step);
+                              nextVal = Math.round(raw * 100) / 100;
+                            }
+                            const old = structuredClone(v);
+                            v[key] = nextVal;
+                            moveAttached(old, v, next);
+                          });
+                        }}
+                      >
+                        −
+                      </button>
+                      <button
+                        type="button"
+                        class="component-step-btn"
+                        aria-label={`Increase component ${key}`}
+                        title={`Increase ${key}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const shift = e.shiftKey;
+                          update((v, next) => {
+                            const currentVal = v[key];
+                            const step = key === "rotation" ? (shift ? 15 : 1) : (shift ? 0.5 : 0.1);
+                            let nextVal: number;
+                            if (key === "rotation") {
+                              const raw = currentVal + step;
+                              nextVal = Math.round((((raw % 360) + 360) % 360) * 10) / 10;
+                            } else {
+                              const raw = currentVal + step;
+                              nextVal = Math.round(raw * 100) / 100;
+                            }
+                            const old = structuredClone(v);
+                            v[key] = nextVal;
+                            moveAttached(old, v, next);
+                          });
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
                   </label>
                 )}
               </For>
@@ -735,6 +911,45 @@ export function createComponentEditor(
                   <ActionIcon name="Delete" />
                 </button>
               </div>
+              <Show when={showIssues()}>
+                <div
+                  class="overlay overlay--center"
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) setShowIssues(false);
+                  }}
+                >
+                  <div
+                    class="palette ve-value-dialog component-issues-modal"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="component-issues-title"
+                  >
+                    <div class="dialog-header">
+                      <h2 id="component-issues-title">Component Issues</h2>
+                    </div>
+                    <div class="dialog-content">
+                      <ul class="component-issues-list" role="status">
+                        <For each={componentIssues()}>
+                          {(issue) => (
+                            <li class="component-issue-item">
+                              <ActionIcon name="alert" />
+                              <span>{issue}</span>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                    <div class="dialog-actions">
+                      <button
+                        type="button"
+                        onClick={() => setShowIssues(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Show>
             </div>
           )}
         </Show>
@@ -908,6 +1123,7 @@ export function createComponentEditor(
       scale = 1,
       offset?: { ids: Set<string>; dx: number; dy: number },
       selectedIds?: Set<string>,
+      highlightNet?: string,
     ) => {
       const px = pcb()?.pxPerMm ?? 1;
       const visible = (pcb()?.components ?? []).filter(
@@ -929,7 +1145,24 @@ export function createComponentEditor(
       );
       for (const [i, c] of visible.entries()) {
         const isSel = c.id === selected() || Boolean(selectedIds?.has(c.id));
-        drawFootprint(ctx, shown[i], px, isSel ? "#ffffff" : "#ffcd11");
+        const hlPads = highlightNet
+          ? new Set(
+              c.terminals
+                .filter((t) => t.netId === highlightNet)
+                .map((t) => t.number),
+            )
+          : undefined;
+        const isDimmed = Boolean(
+          highlightNet && (!hlPads || hlPads.size === 0),
+        );
+        drawFootprint(
+          ctx,
+          shown[i],
+          px,
+          isSel ? "#ffffff" : "#ffcd11",
+          hlPads && hlPads.size > 0 ? hlPads : undefined,
+          isDimmed,
+        );
       }
       const ghost =
         armed() && pcb()?.pxPerMm
@@ -959,6 +1192,12 @@ export function createComponentEditor(
         ctx.lineWidth = lineWidth;
         ctx.setLineDash([lineWidth * 2.5, lineWidth * 2]);
         for (const c of offenders) {
+          // Dimmed (net-highlight) footprints keep their muted look.
+          if (
+            highlightNet &&
+            !c.terminals.some((t) => t.netId === highlightNet)
+          )
+            continue;
           const box = componentWorldBounds(c, px);
           if (!box) continue;
           ctx.strokeRect(
@@ -978,10 +1217,12 @@ export function createComponentEditor(
         return true;
       }
       if (key === "Escape") {
+        const wasArmed = Boolean(armed());
         drag = null;
         setArmed(undefined);
         setSelected("");
-        return false;
+        changed();
+        return wasArmed;
       }
       if (key === "Delete" && current()) {
         remove();

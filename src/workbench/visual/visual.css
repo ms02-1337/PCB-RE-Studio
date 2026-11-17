@@ -1,6 +1,55 @@
 .visual-panel { display:flex; flex-direction:column; height:100%; min-height:0; width:100%; }
-.ve-toolbar { display:flex; align-items:center; flex-shrink:0; gap:5px; padding:6px; border-bottom:1px solid var(--border); overflow-x:auto; }
-.ve-toolbar button { white-space:nowrap; }
+.ve-toolbar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+.ve-toolbar h1 {
+  font-size: 14px;
+  font-weight: bold;
+  margin: 0;
+  line-height: normal;
+  white-space: nowrap;
+}
+.ve-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 0;
+  white-space: nowrap;
+}
+.ve-toolbar select {
+  font: inherit;
+  color: var(--text);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  height: 28px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.ve-toolbar select:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.ve-toolbar button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
 .ve-body { display:flex; flex:1; min-height:0; min-width:0; overflow:hidden; }
 .ve-sidebar { flex-shrink:0; background:var(--surface); min-height:0; display:flex; flex-direction:column; overflow:hidden; padding:0; min-width:0; resize:none; }
 .ve-heading { display:flex; align-items:center; justify-content:space-between; height:34px; flex-shrink:0; padding:3px 6px; border-bottom:1px solid var(--border); }
@@ -62,7 +111,7 @@
 /* Tool toolbar toggling (tools + view flips) */
 .ve-toolbar button[aria-pressed="true"] { border-color:var(--indicator); background:var(--accent); color:#181818; }
 .ve-toolbar button .action-icon { margin-right:0; }
-.ve-tool-separator { width:1px; align-self:stretch; margin:4px 3px; background:var(--border); flex-shrink:0; }
+.ve-tool-separator { width: 1px; height: 18px; align-self: center; margin: 0 4px; background: var(--border); flex-shrink: 0; }
 .ve-toast { position:absolute; left:50%; bottom:44px; transform:translateX(-50%); background:var(--surface); border:1px solid var(--border); padding:5px 12px; border-radius:4px; pointer-events:none; z-index:2; white-space:nowrap; }
 
 /* Value prompt modal */
@@ -217,119 +266,101 @@
 .ve-net-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ve-net-check { font-size: 11px; color: var(--accent, #ffcd11); font-weight: bold; }
 .ve-net-empty { padding: 10px 8px; color: var(--muted); font-size: 11px; text-align: center; font-style: italic; }
-.ve-toolbar { flex-wrap: wrap; }
 /* Nets panel layout */
 .ve-nets {
   height: 100%;
-  overflow: auto;
-  padding: 16px 20px;
+  min-height: 0;
   width: 100%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
 }
+.ve-nets > .muted {
+  margin: 16px 20px;
+}
+/* Header mirrors the BOM toolbar: one horizontal surface bar carrying the
+   title, count and compact controls; the table box below holds the scroll. */
 .ve-nets-header {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 18px;
-}
-.ve-nets-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.ve-nets-title-group {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.ve-nets-title-group h1 {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 600;
-}
-.ve-nets-count {
-  font-size: 13px;
-  color: var(--muted);
-}
-.ve-nets-pcb-control {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.ve-nets-pcb-control label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.ve-nets-pcb-select {
-  font-size: 14px;
-  height: 36px;
-  min-width: 180px;
-  padding: 6px 30px 6px 12px !important;
-  font-weight: 500;
-}
-.ve-nets-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.ve-nets-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 240px;
-  max-width: 400px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
-.ve-nets-search label {
+.ve-nets-header h1 {
+  font-size: 14px;
+  font-weight: bold;
+  margin: 0;
+}
+.ve-nets-title-separator {
+  width: 1px;
+  height: 18px;
+  align-self: center;
+  margin: 0 8px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.ve-nets-count {
   font-size: 12px;
   color: var(--muted);
-  white-space: nowrap;
 }
-.ve-nets-search input {
-  flex: 1;
-  height: 32px;
-  font-size: 13px;
+.ve-nets-header label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.ve-nets-header input,
+.ve-nets-header select {
+  font: inherit;
+  color: var(--text);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  height: 28px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.ve-nets-header select {
+  padding-right: 24px;
+}
+.ve-nets-header input:focus,
+.ve-nets-header select:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.ve-nets-header button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
 }
 .ve-nets-create-form {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 320px;
-  justify-content: flex-end;
-}
-.ve-nets-create-form label {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
 }
 .ve-nets-create-form input {
   width: 180px;
-  height: 32px;
-  font-size: 13px;
-}
-.ve-nets-create-form button {
-  height: 32px;
-  padding: 0 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
 }
 
 /* Nets Table */
 .ve-nets-table-wrapper {
-  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+  margin: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
@@ -341,6 +372,9 @@
   font-size: 13px;
 }
 .ve-nets-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--raised);
   padding: 10px 12px;
   font-size: 11px;
@@ -727,7 +761,77 @@
 .component-manager .component-preview-surface canvas{position:absolute;inset:0;width:100%;height:100%;max-width:none;aspect-ratio:auto;object-fit:fill;touch-action:none}
 .component-preview-fit{position:absolute;right:6px;top:6px;z-index:1;padding:3px 8px}
 .component-manager .component-preview-stage>h3{flex:0 0 auto;margin:10px 0 6px;font-size:13px}
-.component-manager .component-pin-table{flex:0 1 26%;min-height:75px;max-height:200px;overflow:auto}
+.component-manager .component-pin-table{flex:0 1 26%;min-height:75px;max-height:200px;overflow:auto;border:1px solid var(--border);background:var(--bg)}
+.component-pin-table table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.component-pin-table th {
+  padding: 8px 12px;
+  vertical-align: middle;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface, #1e1e1e);
+  color: var(--text);
+  box-sizing: border-box;
+  text-align: left;
+  line-height: normal;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.component-pin-table td {
+  padding: 6px 12px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text);
+  line-height: normal;
+}
+.component-pin-table .col-pad {
+  width: 22%;
+  vertical-align: middle;
+}
+.component-pin-table .col-symbol-pin {
+  width: 60%;
+  vertical-align: middle;
+}
+.component-pin-table .col-nc {
+  width: 18%;
+  text-align: center;
+  vertical-align: middle;
+}
+.component-pin-table th.col-nc {
+  text-align: center;
+}
+.component-pin-table td.col-nc {
+  text-align: center;
+}
+.component-pin-table td.col-nc input[type="checkbox"] {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 auto;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--focus, #ffcd11);
+}
+.component-pin-table td.col-symbol-pin select {
+  width: 100%;
+  height: 28px;
+  min-height: 28px;
+  padding: 2px 8px;
+  box-sizing: border-box;
+  vertical-align: middle;
+  font-size: 12px;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
 .component-manager .component-configuration{height:100%;overflow:auto;box-sizing:border-box}
 @media(max-height:650px){
  .component-manager .component-manager-body{overflow:auto}
@@ -748,8 +852,10 @@
 .component-list-splitter:hover::after,.component-list-splitter:focus-visible::after{background:var(--focus)}
 .component-list-splitter:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .component-manager .component-browser table th,.component-manager .component-browser table td{padding:6px 12px;border-bottom:1px solid var(--border);vertical-align:middle;text-align:left}
-.component-manager .component-browser table th:last-child,.component-manager .component-browser table td:last-child{width:1%;white-space:nowrap;text-align:right}
-.component-row-actions{display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
+.component-manager .component-browser table th.col-name,.component-manager .component-browser table td.col-name{text-align:left}
+.component-manager .component-browser table th.col-source,.component-manager .component-browser table td.col-source{text-align:center}
+.component-manager .component-browser table th:last-child,.component-manager .component-browser table td:last-child,.component-manager .component-browser table th.col-actions,.component-manager .component-browser table td.col-actions{width:1%;white-space:nowrap;text-align:center}
+.component-row-actions{display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;width:100%}
 .component-row-actions button{flex:0 0 auto;width:auto;height:24px;min-height:24px;padding:0 8px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;text-align:center;box-sizing:border-box;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--text);cursor:pointer}
 .component-row-actions button:hover:not(:disabled){background:var(--raised,#2a2a2a);border-color:var(--focus,#ffcd11)}
 .component-row-actions button.component-action-icon-btn{width:24px;min-width:24px;height:24px;min-height:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer}
@@ -773,6 +879,214 @@
 .library-path-row button{flex:0 0 auto;height:28px;min-height:28px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;box-sizing:border-box}
 
 /* Component inspector selection details */
+.component-inspector {
+  padding: 12px;
+  overflow: auto;
+}
+.component-inspector-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px 0;
+}
+.component-inspector-title-row h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.component-issue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: var(--danger, #e5484d);
+  border: 1px solid var(--danger, #e5484d);
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+.component-issue-btn:hover {
+  filter: brightness(1.15);
+}
+.component-issue-btn:active {
+  transform: scale(0.96);
+}
+.component-issue-btn .action-icon {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  vertical-align: 0;
+  stroke: currentColor;
+}
+
+/* Footprint / Symbol rows in inspector */
+.component-footprint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0 4px 0;
+}
+.component-footprint-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.component-symbol-text {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Numeric stepper fields (Rotation, Scale) */
+.component-numeric-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.component-numeric-label {
+  font-size: 12px;
+  color: var(--text);
+}
+.component-numeric-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+.component-numeric-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+}
+.component-step-btn {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--surface, #1e1e1e);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.component-step-btn:hover:not(:disabled) {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--focus, #ffcd11);
+}
+.component-step-btn:active:not(:disabled) {
+  background: var(--border);
+}
+.component-step-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Action icon buttons inside inspector (change footprint, delete, etc.) */
+.component-inspector button.component-action-icon-btn {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.component-inspector button.component-action-icon-btn .action-icon {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  vertical-align: 0;
+}
+.component-inspector button.component-action-icon-btn:hover:not(:disabled) {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--focus, #ffcd11);
+}
+.component-inspector button.component-action-icon-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 85, 85, 0.15);
+  border-color: #ff5555;
+  color: #ff5555;
+}
+.component-inspector button.component-action-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: var(--border);
+}
+
+/* Issues modal */
+.component-issues-modal {
+  min-width: 320px;
+  max-width: 480px;
+}
+.component-issues-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.component-issue-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(229, 72, 77, 0.1);
+  border: 1px solid rgba(229, 72, 77, 0.3);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+}
+.component-issue-item .action-icon {
+  color: var(--danger, #e5484d);
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+}
+
 .component-inspector .ve-net-selector { margin: 8px 0; }
 .component-inspector-actions {
   display: flex;
@@ -798,40 +1112,4 @@
   justify-content: center;
   gap: 6px;
   min-height: 28px;
-}
-.component-inspector-actions button.component-action-icon-btn {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.component-inspector-actions button.component-action-icon-btn .action-icon {
-  margin: 0;
-  width: 14px;
-  height: 14px;
-  vertical-align: 0;
-}
-.component-inspector-actions button.component-action-icon-btn:hover:not(:disabled) {
-  background: var(--raised, #2a2a2a);
-  border-color: var(--muted);
-}
-.component-inspector-actions button.component-action-icon-btn.danger:hover:not(:disabled) {
-  background: rgba(255, 85, 85, 0.15);
-  border-color: #ff5555;
-  color: #ff5555;
-}
-.component-inspector-actions button.component-action-icon-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  border-color: var(--border);
 }

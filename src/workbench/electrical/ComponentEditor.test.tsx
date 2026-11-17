@@ -3,7 +3,7 @@ import { VisualCanvas } from "../visual/VisualCanvas";
 import { kicad } from "../../bridge/kicad";
 import * as domain from "./domain";
 import { beforeEach, afterEach, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import { render, screen, fireEvent, waitFor, within } from "@solidjs/testing-library";
 import { createPlacementStore } from "../placement/store";
 import { SEED_TYPES, type ProjectDoc } from "../placement/projectDoc";
 import { createComponentEditor } from "./ComponentEditor";
@@ -271,14 +271,25 @@ it("notifies about overlapping and near components until they separate", () => {
   editor.down({ x: 0, y: 0 });
   editor.key("Escape");
   editor.down({ x: 0, y: 0 });
+  const issueBtn = screen.getByRole("button", { name: /component issues/i });
+  expect(issueBtn).toBeTruthy();
+  fireEvent.click(issueBtn);
+  expect(screen.queryByLabelText("Close issues dialog")).toBeNull();
   expect(screen.getByRole("status").textContent).toBe("U1 overlaps U2");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("status")).toBeNull();
+
   const near = structuredClone(store.visual.activePcb()!);
   near.components![1].x = 12.9;
   store.visual.replacePcb(near);
+  fireEvent.click(screen.getByRole("button", { name: /component issues/i }));
   expect(screen.getByRole("status").textContent).toBe("U1 near U2 (0.07 mm)");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
   const apart = structuredClone(store.visual.activePcb()!);
   apart.components![1].x = 100;
   store.visual.replacePcb(apart);
+  expect(screen.queryByRole("button", { name: /component issues/i })).toBeNull();
   expect(screen.queryByRole("status")).toBeNull();
 });
 
@@ -410,6 +421,42 @@ it("places through the integrated VisualPanel toolbar and library lifecycle", as
   } finally { mocks.forEach(mock => mock.mockRestore()); }
 });
 
+it("quits component placement on Escape key or clicking Select button", async () => {
+  const mocks = [
+    vi.spyOn(kicad, "definitions").mockResolvedValue([definition]),
+    vi.spyOn(kicad, "sources").mockResolvedValue([]),
+    vi.spyOn(kicad, "search").mockResolvedValue({ entries: [], total: 0 }),
+    vi.spyOn(kicad, "saveDefinition").mockResolvedValue(undefined),
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null),
+  ];
+  try {
+    render(() => <VisualPanel store={store} active />);
+    fireEvent.click(screen.getByRole("button", { name: "Place component" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use saved component" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Place$/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Component library" })).toBeNull());
+    expect(screen.getByText("Click to place | R rotate | Esc cancel")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    expect(screen.queryByText("Click to place | R rotate | Esc cancel")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Place component" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use saved component" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Place$/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Component library" })).toBeNull());
+    expect(screen.getByText("Click to place | R rotate | Esc cancel")).toBeTruthy();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(screen.queryByText("Click to place | R rotate | Esc cancel")).toBeNull();
+  } finally {
+    mocks.forEach(mock => mock.mockRestore());
+  }
+});
+
 it("drags copper over a large component without moving the component", () => {
   const large = structuredClone(definition); large.footprint.pads[0].width=200; large.footprint.pads[0].height=200;
   editor.arm(large); editor.down({x:0,y:0}); editor.key("Escape");
@@ -472,9 +519,16 @@ it("renders standardized component inspector details: capitalized labels, step 0
   fireEvent.click(screen.getByRole("button", { name: "Locked" }));
   expect(store.visual.activePcb()!.components![0].locked).toBe(false);
 
+  const changeFpBtn = screen.getByRole("button", { name: "Change footprint / symbol" });
+  expect(changeFpBtn).toBeTruthy();
+  expect(changeFpBtn.classList.contains("component-action-icon-btn")).toBe(true);
+  expect(changeFpBtn.querySelector(".action-icon")).toBeTruthy();
+
   const bmInput = screen.getByRole("combobox", { name: "Board mapping link" });
   fireEvent.click(bmInput);
-  expect(screen.getByRole("listbox", { name: "Board mapping components list" })).toBeTruthy();
+  const listbox = screen.getByRole("listbox", { name: "Board mapping components list" });
+  expect(listbox).toBeTruthy();
+  expect(listbox.style.maxHeight).toBe("160px");
   const option = screen.getByRole("button", { name: /R10 \(RES-10K\)/ });
   fireEvent.click(option);
 
@@ -483,4 +537,84 @@ it("renders standardized component inspector details: capitalized labels, step 0
   expect(comp.reference).toBe("R10");
   expect(comp.value).toBe("10k");
   expect(comp.partName).toBe("RES-10K");
+});
+
+it("steps rotation and scale with + and - buttons beside the input", async () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+
+  const rotInput = screen.getByLabelText("Component rotation") as HTMLInputElement;
+  expect(rotInput.value).toBe("0");
+
+  const decRotBtn = screen.getByRole("button", { name: "Decrease component rotation" });
+  const incRotBtn = screen.getByRole("button", { name: "Increase component rotation" });
+  expect(decRotBtn).toBeTruthy();
+  expect(incRotBtn).toBeTruthy();
+
+  // Click increase: 0° -> 1°
+  fireEvent.click(incRotBtn);
+  expect(store.visual.activePcb()!.components![0].rotation).toBe(1);
+
+  // Click decrease twice: 1° -> 0° -> 359°
+  fireEvent.click(screen.getByRole("button", { name: "Decrease component rotation" }));
+  expect(store.visual.activePcb()!.components![0].rotation).toBe(0);
+  fireEvent.click(screen.getByRole("button", { name: "Decrease component rotation" }));
+  expect(store.visual.activePcb()!.components![0].rotation).toBe(359);
+
+  // Scale buttons
+  const scaleInput = screen.getByLabelText("Component scale") as HTMLInputElement;
+  expect(scaleInput.value).toBe("1");
+
+  const incScaleBtn = screen.getByRole("button", { name: "Increase component scale" });
+  expect(screen.getByRole("button", { name: "Decrease component scale" })).toBeTruthy();
+  expect(incScaleBtn).toBeTruthy();
+
+  // Click increase: 1 -> 1.1
+  fireEvent.click(incScaleBtn);
+  expect(store.visual.activePcb()!.components![0].scale).toBe(1.1);
+
+  // Click decrease: 1.1 -> 1.0 -> 0.9
+  fireEvent.click(screen.getByRole("button", { name: "Decrease component scale" }));
+  expect(store.visual.activePcb()!.components![0].scale).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: "Decrease component scale" }));
+  expect(store.visual.activePcb()!.components![0].scale).toBe(0.9);
+});
+
+it("notifies errors with a small red badge button on the right and opens issues modal on click", async () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+
+  // Initially no issue button
+  expect(screen.queryByRole("button", { name: /Component issues/ })).toBeNull();
+
+  // Set an issue by adding a duplicate reference to trigger the error
+  const refInput = screen.getByLabelText("Component reference") as HTMLInputElement;
+  // Add another component with reference "R2"
+  const pcb = structuredClone(store.visual.activePcb()!);
+  pcb.components = [
+    ...pcb.components!,
+    { ...pcb.components![0], id: "c2", reference: "R2" },
+  ];
+  store.visual.replacePcb(pcb);
+  fireEvent.change(refInput, { target: { value: "R2" } });
+
+  // The error notification button is now visible with component-issue-btn class
+  const issueBtn = screen.getByRole("button", { name: /Component issues/ });
+  expect(issueBtn).toBeTruthy();
+  expect(issueBtn.classList.contains("component-issue-btn")).toBe(true);
+
+  // Click to open issues modal
+  fireEvent.click(issueBtn);
+  const dialog = screen.getByRole("dialog", { name: "Component Issues" });
+  expect(dialog).toBeTruthy();
+  expect(within(dialog).getByText("Reference already exists.")).toBeTruthy();
+
+  // Close modal
+  const closeBtn = screen.getByRole("button", { name: "Close" });
+  fireEvent.click(closeBtn);
+  expect(screen.queryByRole("dialog", { name: "Component Issues" })).toBeNull();
 });
