@@ -12,56 +12,356 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 .electrical-toolbar h1 {
   font-size: 14px;
-  margin: 0 12px 0 0;
+  font-weight: bold;
+  margin: 0;
+}
+.electrical-separator {
+  width: 1px;
+  height: 18px;
+  align-self: center;
+  margin: 0 8px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 .electrical-toolbar label {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  font-size: 12px;
+}
+.electrical-toolbar input,
+.electrical-toolbar select {
+  font: inherit;
+  color: var(--text);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  height: 28px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.electrical-toolbar select {
+  padding-right: 24px;
+}
+.electrical-toolbar input:focus,
+.electrical-toolbar select:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.electrical-toolbar button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
 }
 .electrical-scroll {
+  overflow: hidden;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+/* Table box shares the Nets-table chrome: bordered, rounded scroll container
+   whose header row and hover highlighting come from the same visual language. */
+.electrical-table-wrapper {
   overflow: auto;
   min-height: 0;
   flex: 1;
-  padding: 8px;
   overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
 }
 .electrical-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12px;
+  text-align: left;
+  font-size: 13px;
 }
 .electrical-table th,
 .electrical-table td {
-  padding: 7px;
+  padding: 8px 12px;
   text-align: left;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
+  vertical-align: middle;
 }
 .electrical-table th {
   position: sticky;
   top: 0;
-  background: var(--surface);
+  z-index: 1;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  background: var(--raised);
+  white-space: nowrap;
+}
+.electrical-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.electrical-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--raised) 50%, transparent);
 }
 .electrical-table input:not([type="checkbox"]) {
-  width: 110px;
+  font: inherit;
+  color: var(--text);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  height: 26px;
+  font-size: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 130px;
 }
-.bom-members {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 8px;
+.electrical-table input:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
 }
-.bom-members label {
+.electrical-table .bom-col-id {
+  width: 44px;
+}
+.electrical-table th.bom-col-qty,
+.electrical-table td.bom-col-qty {
+  width: 72px;
+  text-align: center;
+}
+.electrical-table th.bom-col-val,
+.electrical-table td.bom-col-val {
+  width: 130px;
+  text-align: center;
+}
+.electrical-table .bom-col-fp {
+  min-width: 130px;
+}
+.electrical-table .bom-col-sym {
+  min-width: 220px;
+  width: 28%;
+}
+.electrical-table th.bom-col-part,
+.electrical-table td.bom-col-part {
+  width: 140px;
+  text-align: center;
+}
+.electrical-table .bom-col-refs {
+  width: 160px;
+  max-width: 180px;
+}
+.bom-editable-cell {
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.bom-editable-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-width: 48px;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: text;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text);
+  line-height: normal;
+  user-select: text;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.bom-editable-text:hover {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--border, #444);
+}
+.bom-editable-text:focus-visible {
+  outline: 2px solid var(--focus, #ffcd11);
+  outline-offset: 1px;
+}
+.bom-editable-placeholder {
+  color: var(--muted, #888);
+  opacity: 0.6;
+}
+.electrical-table td.bom-col-val input,
+.electrical-table td.bom-col-part input {
+  text-align: center;
+  margin: 0 auto;
+}
+.bom-ref-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.bom-ref-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.bom-ref-btn {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.bom-ref-btn .action-icon {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  vertical-align: 0;
+}
+.bom-ref-btn:hover {
+  background: var(--raised, #2a2a2a);
+  border-color: var(--focus, #ffcd11);
+}
+
+/* BOM References Modal */
+.palette.bom-references-dialog {
+  width: min(680px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.bom-dialog-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.bom-dialog-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.bom-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 16px;
+  background: var(--bg);
+  overflow: auto;
+  flex: 1;
+}
+.bom-dialog-table-wrap {
+  overflow: auto;
+  max-height: 380px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.bom-dialog-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.bom-dialog-table th,
+.bom-dialog-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  text-align: left;
+}
+.bom-dialog-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.bom-dialog-table tbody tr:hover {
+  background: var(--raised, #2a2a2a);
+}
+.bom-dialog-table .col-check {
+  width: 34px;
+  text-align: center;
+}
+.bom-dialog-table .col-pcb {
+  width: 140px;
+}
+.bom-dialog-table .col-ref {
+  min-width: 140px;
+}
+.bom-dialog-table .col-actions {
+  width: 90px;
+  text-align: right;
+}
+.bom-dialog-table input:not([type="checkbox"]) {
+  font: inherit;
+  color: var(--text);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  height: 26px;
+  font-size: 12px;
+  box-sizing: border-box;
+  width: 100%;
+}
+.bom-dialog-table input:focus {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.bom-locate-btn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bom-dialog-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  gap: 10px;
+}
+.bom-replace-btn {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.bom-replace-btn:not(:disabled):hover {
+  background: var(--accent);
+  color: #181818;
 }
 .schematic-body {
   display: flex;

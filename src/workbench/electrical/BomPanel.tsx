@@ -1,9 +1,10 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { isTauri } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { kicad } from "../../bridge/kicad";
 import type { PlacementStore } from "../placement/store";
 import type { ElectricalComponent } from "./model";
+import { ActionIcon } from "../ActionIcon";
 import "./electrical.css";
 
 export interface BomMember {
@@ -82,6 +83,93 @@ export function bomCsv(rows: BomRow[], includePcb = false): string {
     .join("\r\n");
 }
 
+export function BomEditableCell(props: {
+  value: string;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal(props.value);
+  let inputRef: HTMLInputElement | undefined;
+
+  createEffect(() => {
+    if (!editing()) {
+      setDraft(props.value);
+    }
+  });
+
+  const startEditing = () => {
+    setDraft(props.value);
+    setEditing(true);
+    setTimeout(() => {
+      inputRef?.focus();
+      inputRef?.select();
+    }, 0);
+  };
+
+  const commit = () => {
+    if (!editing()) return;
+    const next = draft();
+    setEditing(false);
+    if (next !== props.value) {
+      props.onChange(next);
+    }
+  };
+
+  return (
+    <div class="bom-editable-cell">
+      <Show
+        when={editing()}
+        fallback={
+          <span
+            tabIndex={0}
+            role="button"
+            class="bom-editable-text"
+            aria-label={props.label}
+            title="Click to edit"
+            onClick={startEditing}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                startEditing();
+              }
+            }}
+          >
+            {props.value ? (
+              props.value
+            ) : (
+              <span class="bom-editable-placeholder">—</span>
+            )}
+          </span>
+        }
+      >
+        <input
+          ref={(el) => {
+            inputRef = el;
+            setTimeout(() => {
+              el.focus();
+              el.select();
+            }, 0);
+          }}
+          aria-label={props.label}
+          value={draft()}
+          onInput={(e) => setDraft(e.currentTarget.value)}
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commit();
+            } else if (e.key === "Escape") {
+              setDraft(props.value);
+              setEditing(false);
+            }
+          }}
+        />
+      </Show>
+    </div>
+  );
+}
+
 export function BomPanel(props: {
   store: PlacementStore;
   onNavigate?: (componentId: string) => void;
@@ -89,7 +177,7 @@ export function BomPanel(props: {
 }) {
   const [filter, setFilter] = createSignal("active");
   const [query, setQuery] = createSignal("");
-  const [expanded, setExpanded] = createSignal("");
+  const [modalKey, setModalKey] = createSignal("");
   const [selected, setSelected] = createSignal<string[]>([]);
   const [error, setError] = createSignal("");
   const rows = createMemo(() =>
@@ -113,6 +201,22 @@ export function BomPanel(props: {
         ),
     ),
   );
+  const activeModalRow = () => rows().find((r) => r.key === modalKey());
+
+  const allSelected = () => {
+    const m = activeModalRow()?.members ?? [];
+    return m.length > 0 && m.every((x) => selected().includes(x.component.id));
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    const m = activeModalRow()?.members ?? [];
+    if (checked) {
+      setSelected(m.map((x) => x.component.id));
+    } else {
+      setSelected([]);
+    }
+  };
+
   const edit = (
     members: BomMember[],
     field: "reference" | "value" | "partName",
@@ -162,13 +266,14 @@ export function BomPanel(props: {
     <section class="electrical-panel" aria-label="Bill of materials">
       <div class="electrical-toolbar">
         <h1>Bill of materials</h1>
+        <span class="electrical-separator" aria-hidden="true" />
         <label>
           PCB scope{" "}
           <select
             value={filter()}
             onChange={(e) => {
               setFilter(e.currentTarget.value);
-              setExpanded("");
+              setModalKey("");
             }}
           >
             <option value="active">Active PCB</option>
@@ -196,150 +301,222 @@ export function BomPanel(props: {
           when={rows().length}
           fallback={<p>No placed components match this view.</p>}
         >
-          <table class="electrical-table">
+          <div class="electrical-table-wrapper">
+            <table class="electrical-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Quantity</th>
-                <th>Value</th>
-                <th>Footprint</th>
-                <th>Symbol</th>
-                <th>Part name</th>
-                <th>References</th>
-                <th>Actions</th>
+                <th class="bom-col-id">ID</th>
+                <th class="bom-col-qty">Quantity</th>
+                <th class="bom-col-val">Value</th>
+                <th class="bom-col-fp">Footprint</th>
+                <th class="bom-col-sym">Symbol</th>
+                <th class="bom-col-part">Part name</th>
+                <th class="bom-col-refs">References</th>
               </tr>
             </thead>
             <tbody>
               <For each={rows()}>
                 {(row, index) => {
                   const first = () => row.members[0].component;
+                  const refsText = () =>
+                    row.members
+                      .map(
+                        (m) =>
+                          `${filter() === "all" ? `${m.pcbName}:` : ""}${m.component.reference}`,
+                      )
+                      .join(", ");
                   return (
-                    <>
-                      <tr>
-                        <td>{index() + 1}</td>
-                        <td>{row.members.length}</td>
-                        <td>
-                          <input
-                            aria-label={`Value for row ${index() + 1}`}
-                            value={first().value}
-                            onChange={(e) =>
-                              edit(row.members, "value", e.currentTarget.value)
-                            }
-                          />
-                        </td>
-                        <td>{first().definition.footprint.name}</td>
-                        <td>
-                          {first().definition.symbol?.name ??
-                            "Generic (unresolved)"}
-                        </td>
-                        <td>
-                          <input
-                            aria-label={`Part name for row ${index() + 1}`}
-                            value={first().partName}
-                            onChange={(e) =>
-                              edit(
-                                row.members,
-                                "partName",
-                                e.currentTarget.value,
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          {row.members
-                            .map(
-                              (m) =>
-                                `${filter() === "all" ? `${m.pcbName}:` : ""}${m.component.reference}`,
-                            )
-                            .join(", ")}
-                        </td>
-                        <td>
+                    <tr>
+                      <td class="bom-col-id">{index() + 1}</td>
+                      <td class="bom-col-qty">{row.members.length}</td>
+                      <td class="bom-col-val">
+                        <BomEditableCell
+                          value={first().value}
+                          label={`Value for row ${index() + 1}`}
+                          onChange={(val) => edit(row.members, "value", val)}
+                        />
+                      </td>
+                      <td class="bom-col-fp">{first().definition.footprint.name}</td>
+                      <td class="bom-col-sym">
+                        {first().definition.symbol?.name ??
+                          "Generic (unresolved)"}
+                      </td>
+                      <td class="bom-col-part">
+                        <BomEditableCell
+                          value={first().partName}
+                          label={`Part name for row ${index() + 1}`}
+                          onChange={(val) => edit(row.members, "partName", val)}
+                        />
+                      </td>
+                      <td class="bom-col-refs">
+                        <div class="bom-ref-cell">
+                          <span class="bom-ref-text" title={refsText()}>
+                            {refsText()}
+                          </span>
                           <button
-                            aria-expanded={expanded() === row.key}
+                            type="button"
+                            class="bom-ref-btn"
+                            aria-label={`References / replace for row ${index() + 1}`}
+                            title="References / replace"
                             onClick={() => {
-                              setExpanded(
-                                expanded() === row.key ? "" : row.key,
-                              );
+                              setError("");
                               setSelected(
                                 row.members.map((m) => m.component.id),
                               );
+                              setModalKey(row.key);
                             }}
                           >
-                            References / replace
+                            <ActionIcon name="Open" />
                           </button>
-                        </td>
-                      </tr>
-                      <Show when={expanded() === row.key}>
-                        <tr>
-                          <td colspan="8">
-                            <div class="bom-members">
-                              <For each={row.members}>
-                                {(member) => (
-                                  <label>
-                                    <input
-                                      type="checkbox"
-                                      checked={selected().includes(
-                                        member.component.id,
-                                      )}
-                                      onChange={(e) =>
-                                        setSelected(
-                                          e.currentTarget.checked
-                                            ? [
-                                                ...selected(),
-                                                member.component.id,
-                                              ]
-                                            : selected().filter(
-                                                (id) =>
-                                                  id !== member.component.id,
-                                              ),
-                                        )
-                                      }
-                                    />
-                                    {member.pcbName}
-                                    <input
-                                      aria-label={`Reference ${member.component.reference}`}
-                                      value={member.component.reference}
-                                      onChange={(e) =>
-                                        edit(
-                                          [member],
-                                          "reference",
-                                          e.currentTarget.value,
-                                        )
-                                      }
-                                    />
-                                    <button
-                                      onClick={() => {
-                                        props.store.visual.activate(
-                                          member.pcbId,
-                                        );
-                                        props.onNavigate?.(member.component.id);
-                                      }}
-                                    >
-                                      Locate
-                                    </button>
-                                  </label>
-                                )}
-                              </For>
-                              <button
-                                disabled={
-                                  !selected().length || !props.onReplace
-                                }
-                                onClick={() => props.onReplace?.(selected())}
-                              >
-                                Replace footprint / symbol…
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      </Show>
-                    </>
+                        </div>
+                      </td>
+                    </tr>
                   );
                 }}
               </For>
             </tbody>
-          </table>
+            </table>
+          </div>
         </Show>
       </div>
+
+      <Show when={activeModalRow()} keyed>
+        {(row) => {
+          const first = () => row.members[0].component;
+          const title = () =>
+            first().value
+              ? `${first().value} · ${first().definition.symbol?.name ?? first().definition.footprint.name}`
+              : first().definition.symbol?.name ??
+                first().definition.footprint.name;
+          return (
+            <div
+              class="overlay overlay--center"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setModalKey("");
+              }}
+            >
+              <section
+                class="palette bom-references-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`References for ${title()}`}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setModalKey("");
+                  }
+                }}
+              >
+                <header class="bom-dialog-header">
+                  <h2>
+                    References — {title()} ({row.members.length})
+                  </h2>
+                </header>
+                <div class="bom-dialog-content">
+                  <Show when={error()}>
+                    <p class="pl-error" role="alert">
+                      {error()}
+                    </p>
+                  </Show>
+                  <div class="bom-dialog-table-wrap">
+                    <table class="bom-dialog-table">
+                      <thead>
+                        <tr>
+                          <th class="col-check">
+                            <input
+                              type="checkbox"
+                              aria-label="Select all references"
+                              checked={allSelected()}
+                              onChange={(e) =>
+                                toggleSelectAll(e.currentTarget.checked)
+                              }
+                            />
+                          </th>
+                          <th class="col-pcb">PCB</th>
+                          <th class="col-ref">Reference</th>
+                          <th class="col-actions">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <For each={row.members}>
+                          {(member) => (
+                            <tr>
+                              <td class="col-check">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select ${member.component.reference}`}
+                                  checked={selected().includes(
+                                    member.component.id,
+                                  )}
+                                  onChange={(e) => {
+                                    const id = member.component.id;
+                                    setSelected(
+                                      e.currentTarget.checked
+                                        ? [...selected(), id]
+                                        : selected().filter((x) => x !== id),
+                                    );
+                                  }}
+                                />
+                              </td>
+                              <td class="col-pcb">{member.pcbName}</td>
+                              <td class="col-ref">
+                                <input
+                                  aria-label={`Reference ${member.component.reference}`}
+                                  value={member.component.reference}
+                                  onChange={(e) =>
+                                    edit(
+                                      [member],
+                                      "reference",
+                                      e.currentTarget.value,
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td class="col-actions">
+                                <button
+                                  type="button"
+                                  class="bom-locate-btn"
+                                  onClick={() => {
+                                    props.store.visual.activate(member.pcbId);
+                                    props.onNavigate?.(member.component.id);
+                                    setModalKey("");
+                                  }}
+                                >
+                                  <ActionIcon name="View" />Locate
+                                </button>
+                              </td>
+                            </tr>
+                          )}
+                        </For>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <footer class="bom-dialog-footer">
+                  <button
+                    type="button"
+                    class="bom-replace-btn"
+                    disabled={!selected().length || !props.onReplace}
+                    onClick={() => {
+                      props.onReplace?.(selected());
+                      setModalKey("");
+                    }}
+                  >
+                    <ActionIcon name="Settings" />Replace footprint / symbol… ({selected().length} selected)
+                  </button>
+                  <button
+                    type="button"
+                    class="type-close"
+                    onClick={() => setModalKey("")}
+                  >
+                    <ActionIcon name="Close" />Close
+                  </button>
+                </footer>
+              </section>
+            </div>
+          );
+        }}
+      </Show>
     </section>
   );
 }
