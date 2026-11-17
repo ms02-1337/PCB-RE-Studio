@@ -761,10 +761,17 @@ export function SchematicPanel(props: {
       const r = svg.getBoundingClientRect();
       if (Math.abs(e.clientX - pan.x) + Math.abs(e.clientY - pan.y) > 2)
         pan.moved = true;
+      // preserveAspectRatio="xMidYMid meet" scales the viewBox uniformly, so
+      // pixels→world is one scale (the larger ratio); using separate ratios
+      // makes one axis lag behind the cursor whenever aspects differ.
+      const s = Math.max(
+        pan.view.w / (r.width || 1),
+        pan.view.h / (r.height || 1),
+      );
       setView({
         ...pan.view,
-        x: pan.view.x - ((e.clientX - pan.x) * pan.view.w) / (r.width || 1),
-        y: pan.view.y - ((e.clientY - pan.y) * pan.view.h) / (r.height || 1),
+        x: pan.view.x - (e.clientX - pan.x) * s,
+        y: pan.view.y - (e.clientY - pan.y) * s,
       });
       return;
     }
