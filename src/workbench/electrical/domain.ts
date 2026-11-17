@@ -91,7 +91,10 @@ export function createInstance(
     layerId,
     rotation: 0,
     scale: 1,
-    terminals: terminalNumbers(d).map((number) => ({ number })),
+    terminals: terminalNumbers(d).map((number) => ({
+      number,
+      ...(d.ncPins?.includes(number) ? { nc: true } : {}),
+    })),
   };
 }
 export function ensureSchematic(pcb: VisualPcb) {
@@ -127,9 +130,19 @@ export function mapReplacement(c: ElectricalComponent, d: ComponentDefinition) {
   return {
     ...c,
     definition: structuredClone(d),
-    terminals: numbers.map(
-      (number) => c.terminals.find((t) => t.number === number) ?? { number },
-    ),
+    terminals: numbers.map((number) => {
+      const existing = c.terminals.find((t) => t.number === number);
+      if (existing) {
+        if (d.ncPins?.includes(number)) {
+          return { ...existing, nc: true, netId: undefined };
+        }
+        return existing;
+      }
+      return {
+        number,
+        ...(d.ncPins?.includes(number) ? { nc: true } : {}),
+      };
+    }),
   };
 }
 export function drawGraphics(

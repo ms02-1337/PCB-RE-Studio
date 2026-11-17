@@ -274,3 +274,72 @@ it("records a pad anchor when an edited endpoint snaps to a component pin", () =
   editor.down({x:50,y:50},1,true,0);editor.up({x:80,y:80},1,true);
   expect(store.visual.activePcb()!.traces![0].endPad).toBeUndefined();
 });
+
+it("highlights everything in a net when hovering over a trace and clears on move away", () => {
+  trace({ x: 0, y: 0 }, { x: 100, y: 0 });
+  const pcb = store.visual.activePcb()!;
+  const netId = pcb.traces![0].netId!;
+  expect(netId).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Select" }));
+  expect(editor.drawing()).toBe(false);
+
+  // Mousing over the trace sets hoverNet to the trace's net
+  editor.move({ x: 50, y: 0 }, 1, false);
+  expect(editor.highlightedNet()).toBe(netId);
+
+  // Drawing while highlighted draws halo stroke with white outline
+  const strokes: string[] = [];
+  const ctx = {
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    closePath: vi.fn(),
+    stroke: vi.fn(() => {
+      strokes.push(String(ctx.strokeStyle));
+    }),
+    fill: vi.fn(),
+    arc: vi.fn(),
+    fillRect: vi.fn(),
+    strokeRect: vi.fn(),
+    setLineDash: vi.fn(),
+    globalAlpha: 1,
+    strokeStyle: "",
+    fillStyle: "",
+    lineWidth: 1,
+    lineCap: "",
+    lineJoin: "",
+  } as unknown as CanvasRenderingContext2D;
+
+  editor.draw(ctx, 1);
+  expect(strokes).toContain("#ffffff");
+
+  // Mousing away from the trace clears the net highlight
+  editor.move({ x: 50, y: 250 }, 1, false);
+  expect(editor.highlightedNet()).toBe("");
+
+  // Re-hovering and clearHover() resets the highlight
+  editor.move({ x: 50, y: 0 }, 1, false);
+  expect(editor.highlightedNet()).toBe(netId);
+  editor.clearHover();
+  expect(editor.highlightedNet()).toBe("");
+});
+
+it("locate() selects the element, lights its net and switches layer", () => {
+  trace({ x: 0, y: 0 }, { x: 100, y: 0 });
+  const pcb = store.visual.activePcb()!;
+  const traceId = pcb.traces![0].id;
+  const netId = pcb.traces![0].netId!;
+  const backLayer = pcb.layers[1];
+
+  editor.locate(traceId, netId, backLayer);
+  expect(editor.mode()).toBe("select");
+  expect(editor.selected()).toBe(traceId);
+  expect(editor.layer()).toBe(backLayer);
+  expect(editor.highlightedNet()).toBe(netId);
+  // The inspector reflects the selection (lock action available).
+  expect(screen.getByRole("button", { name: "Lock element" })).toBeTruthy();
+});

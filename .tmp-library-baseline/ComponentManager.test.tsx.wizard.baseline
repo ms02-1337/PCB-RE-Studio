@@ -1,0 +1,21 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import { ComponentManager } from "./ComponentManager";
+import { kicad, type ComponentDefinition } from "../../bridge/kicad";
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false }));
+const definition: ComponentDefinition = { id:"d", name:"Connector", partName:"P", value:"V", referencePrefix:"J", pinMap:{"1":"1"}, footprint:{id:"fp",name:"Connector footprint",source:"",raw:"",graphics:[],diagnostics:[],pads:[]} };
+afterEach(() => vi.restoreAllMocks());
+function setup(reason?: string) {
+ vi.spyOn(kicad,"sources").mockResolvedValue([]); vi.spyOn(kicad,"definitions").mockResolvedValue([definition]); vi.spyOn(kicad,"search").mockResolvedValue({entries:[],total:0}); vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(null);
+ const place=vi.fn(); render(() => <ComponentManager initial={definition} onClose={() => {}} onPlace={place} placementUnavailableReason={reason} />); return place;
+}
+it("retains draft and search across configuration and shows previews together", async () => {
+ setup(); fireEvent.input(screen.getByLabelText("Component name"),{target:{value:"Edited"}}); fireEvent.input(screen.getByLabelText("Search library"),{target:{value:"connector"}});
+ fireEvent.click(screen.getByRole("button",{name:"Configuration"})); expect(screen.getByRole("heading",{name:"KiCad libraries"})).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Back to component"}));
+ expect((screen.getByLabelText("Component name") as HTMLInputElement).value).toBe("Edited"); expect((screen.getByLabelText("Search library") as HTMLInputElement).value).toBe("connector");
+ expect(screen.getByLabelText("Footprint preview").parentElement?.parentElement).toBe(screen.getByLabelText("Symbol preview").parentElement?.parentElement);
+ await waitFor(() => expect(kicad.search).toHaveBeenCalled());
+});
+it("blocks Place with a visible calibration reason", () => { const place=setup("Calibrate the PCB before placement."); const button=screen.getByRole("button",{name:"Place"}) as HTMLButtonElement; expect(button.disabled).toBe(true); fireEvent.click(button); expect(place).not.toHaveBeenCalled(); expect(screen.getByText("Calibrate the PCB before placement.")).toBeTruthy(); });
+it("loads saved components through a table and hands a saved definition to placement", async () => { const place=setup(); vi.spyOn(kicad,"saveDefinition").mockResolvedValue(); fireEvent.click(screen.getByRole("tab",{name:"Saved components"})); await waitFor(() => expect(screen.getByRole("button",{name:"Load"})).toBeTruthy()); fireEvent.click(screen.getByRole("button",{name:"Place"})); await waitFor(() => expect(place).toHaveBeenCalledWith(definition)); });

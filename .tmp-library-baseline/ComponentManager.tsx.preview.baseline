@@ -1,0 +1,487 @@
+﻿import {
+  createEffect,
+  createSignal,
+  For,
+  Show,
+  onCleanup,
+  onMount,
+} from "solid-js";
+import { LibrarySettings } from "./LibrarySettings";
+import { ActionIcon } from "../ActionIcon";
+import {
+  kicad,
+  type ComponentDefinition,
+  type LibraryEntry,
+  type LibrarySource,
+} from "../../bridge/kicad";
+import { visualId } from "../visual/model";
+import { drawFootprint, drawGraphics, terminalNumbers } from "./domain";
+export function ComponentManager(props: {
+  initial?: ComponentDefinition;
+  onClose: () => void;
+  onPlace: (d: ComponentDefinition) => void;
+  placementUnavailableReason?: string;
+  onApply?: (d: ComponentDefinition) => void;
+}) {
+  type Step = "start" | "saved" | "footprint" | "symbol" | "review";
+  const [step, setStep] = createSignal<Step>(props.initial ? "review" : "start");
+  const [savedFlow, setSavedFlow] = createSignal(!!props.initial);
+  const [success, setSuccess] = createSignal("");
+  const [definition, setDefinition] = createSignal<
+      ComponentDefinition | undefined
+    >(props.initial ? structuredClone(props.initial) : undefined),
+    [saved, setSaved] = createSignal<ComponentDefinition[]>([]),
+    [sources, setSources] = createSignal<LibrarySource[]>([]),
+    [configuration, setConfiguration] = createSignal(false),
+    [revision, setRevision] = createSignal(0),
+    [loading, setLoading] = createSignal(false),
+    [query, setQuery] = createSignal(""),
+    [kind, setKind] = createSignal<"saved" | "footprint" | "symbol">("footprint"),
+    [entries, setEntries] = createSignal<LibraryEntry[]>([]),
+    [total, setTotal] = createSignal(0),
+    [offset, setOffset] = createSignal(0),
+    [error, setError] = createSignal(""),
+
+    [busy, setBusy] = createSignal(false);
+  let dialog: HTMLElement | undefined;
+  let alive = true,
+    request = 0;
+  onCleanup(() => {
+    alive = false;
+  });
+  const guard = async <T,>(
+    action: () => Promise<T>,
+  ): Promise<T | undefined> => {
+    setError("");
+    try {
+      return await action();
+    } catch (e) {
+      if (alive) setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const refresh = async () => {
+    const result = await guard(() =>
+      Promise.all([kicad.definitions(), kicad.sources()]),
+    );
+    if (result && alive) {
+      setSaved(result[0]);
+      setSources(result[1]);
+    }
+  };
+  onMount(() => {
+    void refresh();
+  });
+  createEffect(() => {
+    revision();
+    const q = query(),
+      k = kind(),
+      o = offset(),
+      token = ++request;
+    if (k === "saved" || !["footprint", "symbol"].includes(step())) return;
+    setEntries([]);
+    setError("");
+    setLoading(true);
+    void kicad.search(k, q, o, 50).then((page) => {
+      if (page && alive && token === request) {
+        setLoading(false);
+        setEntries(page.entries);
+        setTotal(page.total);
+      }
+    }).catch(e => { if (alive && token === request) setError(e instanceof Error ? e.message : String(e)); }).finally(() => { if (alive && token === request) setLoading(false); });
+  });
+  const patch = (values: Partial<ComponentDefinition>) => {
+    setSuccess("");
+    setDefinition((d) => (d ? { ...d, ...values } : d));
+  };
+  const choose = async (entry: LibraryEntry) => {
+    if (busy()) return;
+    setSuccess("");
+    setBusy(true);
+    if (entry.kind === "footprint") {
+      const fp = await guard(() => kicad.footprint(entry.id));
+      if (fp && alive) {
+        const d = definition();
+        const next: ComponentDefinition = {
+          ...d,
+          id: d?.id ?? visualId(),
+          name: d?.name ?? fp.name,
+          partName: d?.partName ?? "",
+          value: d?.value ?? "",
+          referencePrefix: d?.referencePrefix ?? "U",
+          footprint: fp,
+          symbol: undefined,
+          pinMap: {},
+        };
+        next.pinMap = Object.fromEntries(terminalNumbers(next).map(n => [n,n]));
+        setDefinition(next);
+      }
+    } else {
+      const symbol = await guard(() => kicad.symbol(entry.id));
+      if (symbol && alive)
+        patch({
+          symbol,
+          pinMap: Object.fromEntries(terminalNumbers(definition()!).map(n => [n, symbol.units.some(u => u.pins.some(p => p.number === n)) ? n : ""])),
+          referencePrefix:
+            definition()?.referencePrefix === "U"
+              ? symbol.reference
+              : definition()?.referencePrefix,
+        });
+    }
+    setBusy(false);
+  };
+  const save = async (place = false) => {
+    const d = definition();
+    if (!d || busy() || step() !== "review" || (place && props.placementUnavailableReason)) return;
+    if (!d.name.trim()) {
+      setError("Enter a component name.");
+      return;
+    }
+    if (d.footprint.diagnostics.length || d.symbol?.diagnostics.length) {
+      setError("Resolve unsupported library geometry before use.");
+      return;
+    }
+    setBusy(true);
+    setSuccess("");
+    const result = await guard(async () => {
+      await kicad.saveDefinition(d);
+      return true;
+    });
+    if (result && alive) {
+      await refresh();
+      if (!alive) return;
+      if (place) props.onPlace(structuredClone(d));
+      else setSuccess("Component saved to library.");
+    }
+    if (alive) setBusy(false);
+  };
+  const navigate = (next: Step) => {
+    setStep(next); setError(""); setSuccess(""); setQuery(""); setOffset(0);
+    if (next === "saved" || next === "footprint" || next === "symbol") setKind(next);
+    queueMicrotask(() => {
+      if (!alive) return;
+      const selector = next === "review" ? ".component-fields input" : next === "start" ? ".component-start button" : ".component-browser input";
+      dialog?.querySelector<HTMLElement>(selector)?.focus();
+    });
+  };
+  const startNew = () => { setDefinition(undefined); setSavedFlow(false); navigate("footprint"); };
+  const back = () => navigate(step() === "review" ? (savedFlow() ? "saved" : "symbol") : step() === "symbol" ? "footprint" : "start");
+  const genericSymbol = () => { const d = definition(); if (d) patch({symbol:undefined,pinMap:Object.fromEntries(terminalNumbers(d).map(n=>[n,n]))}); };
+  const [previewUnit, setPreviewUnit] = createSignal(1),
+    [previewStyle, setPreviewStyle] = createSignal(1),
+    [selectedPad, setSelectedPad] = createSignal("");
+  const Preview = (p: { symbol?: boolean }) => {
+    const [zoom, setZoom] = createSignal(8);
+    let canvas!: HTMLCanvasElement;
+    createEffect(() => {
+      const d = definition();
+      if (!d || !canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, 400, 220);
+      ctx.save();
+      ctx.translate(200, 110);
+      ctx.scale(zoom(), zoom());
+      ctx.strokeStyle = "#ffcd11";
+      ctx.fillStyle = "#ffcd11";
+      if (p.symbol && d.symbol) {
+        const units = d.symbol.units.filter(
+          (u) =>
+            (u.unit === previewUnit() || u.unit === 0) &&
+            (u.bodyStyle === previewStyle() || u.bodyStyle === 0),
+        );
+        const unit = {
+          graphics: units.flatMap((u) => u.graphics),
+          pins: units.flatMap((u) => u.pins),
+        };
+        ctx.save();
+        ctx.scale(1, -1);
+        drawGraphics(ctx, unit?.graphics ?? []);
+        ctx.restore();
+        for (const pin of unit?.pins ?? []) {
+          ctx.font = "1px sans-serif";
+          ctx.fillText(`${pin.number} ${pin.name}`, pin.x, -pin.y);
+          ctx.beginPath();
+          ctx.moveTo(pin.x, -pin.y);
+          ctx.lineTo(
+            pin.x + Math.cos((pin.rotation * Math.PI) / 180) * pin.length,
+            -pin.y - Math.sin((pin.rotation * Math.PI) / 180) * pin.length,
+          );
+          ctx.stroke();
+        }
+      } else if (!p.symbol)
+        drawFootprint(
+          ctx,
+          {
+            id: "preview",
+            definition: d,
+            reference: d.referencePrefix,
+            value: d.value,
+            partName: d.partName,
+            x: 0,
+            y: 0,
+            layerId: "",
+            rotation: 0,
+            scale: 1,
+            terminals: [],
+          },
+          1,
+          "#ffcd11",
+        );
+      else {
+        ctx.strokeRect(-10, -8, 20, 16);
+        ctx.font = "1px sans-serif";
+        terminalNumbers(d).forEach((n, i) => ctx.fillText(n, -12, -6 + i * 2));
+      }
+      ctx.restore();
+    });
+    return (
+      <canvas
+        onWheel={(e) => {
+          e.preventDefault();
+          setZoom(
+            Math.max(0.2, Math.min(60, zoom() * Math.exp(-e.deltaY * 0.001))),
+          );
+        }}
+        onClick={(e) => {
+          const bounds = canvas.getBoundingClientRect(),
+            point = {
+              x:
+                (((e.clientX - bounds.left) * 400) / bounds.width - 200) /
+                zoom(),
+              y:
+                (((e.clientY - bounds.top) * 220) / bounds.height - 110) /
+                zoom(),
+            },
+            d = definition();
+          if (!d) return;
+          if (p.symbol) {
+            const pins =
+              d.symbol?.units
+                .filter((u) => u.unit === previewUnit() || u.unit === 0)
+                .flatMap((u) => u.pins) ?? [];
+            const hit = pins.find(
+              (pin) => Math.hypot(pin.x - point.x, -pin.y - point.y) < 2,
+            );
+            if (hit)
+              setSelectedPad(
+                Object.keys(d.pinMap).find((n) => d.pinMap[n] === hit.number) ??
+                  "",
+              );
+          } else {
+            const hit = d.footprint.pads.find(
+              (pad) =>
+                Math.hypot(pad.x - point.x, pad.y - point.y) <
+                Math.max(pad.width, pad.height),
+            );
+            if (hit) setSelectedPad(hit.number);
+          }
+        }}
+        ref={canvas}
+        width={400}
+        height={220}
+        aria-label={p.symbol ? "Symbol preview" : "Footprint preview"}
+      />
+    );
+  };
+  return (
+    <div
+      class="overlay overlay--center"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onClose();
+      }}
+    >
+      <section
+        ref={dialog}
+        class="palette component-manager"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Component library"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            props.onClose();
+          }
+          if (e.key === "Tab") {
+            const items = Array.from(
+              e.currentTarget.querySelectorAll<HTMLElement>(
+                "button:not([disabled]),input:not([disabled]),select:not([disabled])",
+              ),
+            ).filter(item => !item.closest("[hidden]"));
+            if (e.shiftKey && document.activeElement === items[0]) {
+              e.preventDefault();
+              items.at(-1)?.focus();
+            } else if (!e.shiftKey && document.activeElement === items.at(-1)) {
+              e.preventDefault();
+              items[0]?.focus();
+            }
+          }
+        }}
+      >
+        <header class="dialog-header">
+          <h2>Component library</h2>
+        </header>
+        <div class="component-manager-body">
+          <div hidden={!configuration()} class="component-configuration"><LibrarySettings onChanged={() => { void refresh(); setRevision(n => n + 1); }} /></div>
+          <main hidden={configuration()}>
+            <Show when={step() === "start"}><section class="component-start"><h3>Choose a component</h3><p>Use a saved component, or create one from a footprint and an optional library symbol.</p><button autofocus onClick={() => { setSavedFlow(true); navigate("saved"); }}>Use saved component</button><button onClick={startNew}>Create new component</button></section></Show>
+            <Show when={step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span></nav></Show>
+            <Show when={step() === "review" && definition()}>{d => <div class="component-fields">
+              <For each={["name", "partName", "value", "referencePrefix"] as const}>{key => <label>{({ name: "Name", partName: "Part number", value: "Value", referencePrefix: "Reference prefix" })[key]}<input aria-label={`Component ${key}`} value={d()[key]} onInput={e => patch({ [key]: e.currentTarget.value })} /></label>}</For>
+            </div>}</Show>
+            <section hidden={!["saved","footprint","symbol"].includes(step())} class="component-browser" aria-label="Library browser">
+              <div class="component-browser-controls">
+                <h3>{step() === "saved" ? "Saved components" : step() === "symbol" ? "Select a symbol (optional)" : "Select a footprint"}</h3>
+                <label>Search <input autofocus aria-label="Search library" value={query()} onInput={e => { setQuery(e.currentTarget.value); setOffset(0); }} /></label>
+
+              </div>
+              <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results" aria-busy={loading() && kind() !== "saved"}><Show when={!loading() || kind() === "saved"} fallback={<div class="component-library-loading" role="status" aria-live="polite"><span class="component-library-spinner" aria-hidden="true" /><strong>Loading KiCad library</strong><span>Fetching {kind() === "symbol" ? "symbols" : "footprints"}...</span></div>}><table><thead><tr><th>Name</th><th>Source / Footprint</th><th>Actions</th></tr></thead><tbody>
+                <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td>{entry.name}</td><td>{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td><button disabled={busy() || loading() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></td></tr>}</For>}>
+                  <For each={saved().filter(d => d.name.toLowerCase().includes(query().toLowerCase())).sort((a,b) => a.name.localeCompare(b.name))}>{d => <tr classList={{ selected: definition()?.id === d.id }}><td>{d.name}</td><td>{d.footprint.name}</td><td><button onClick={() => { setDefinition(structuredClone(d)); setSavedFlow(true); navigate("review"); }}>Load</button><button aria-label={`Duplicate ${d.name}`} onClick={() => { setDefinition({ ...structuredClone(d), id: visualId(), name: d.name + " copy" }); setSavedFlow(true); navigate("review"); }}>Duplicate</button><button aria-label={`Delete ${d.name}`} onClick={() => { if (confirm(`Delete local definition ${d.name}? Placed components stay unchanged.`)) void guard(() => kicad.deleteDefinition(d.id)).then(refresh); }}>Delete</button></td></tr>}</For>
+                </Show>
+              </tbody></table></Show></div>
+              <Show when={kind() !== "saved"}><div class="component-pagination"><button disabled={!offset()} onClick={() => setOffset(Math.max(0,offset()-50))}>Previous page</button><span role="status">{loading() ? "Loading..." : `${total() ? offset()+1 : 0}-${Math.min(offset()+50,total())} / ${total()}`}</span><button disabled={offset()+50 >= total()} onClick={() => setOffset(offset()+50)}>Next page</button></div></Show>
+              <Show when={kind() !== "saved" && !loading() && !entries().length}><p>No matching library entries.</p></Show>
+            </section>
+            <Show when={step() !== "start" && step() !== "saved"}>
+              {(visible) => (
+                <div data-visible={visible()}>
+                  <div class="component-previews">
+                    <div>
+                      <h3>{definition()?.footprint.name ?? "Footprint preview"}</h3>
+                      <Preview />
+                    </div>
+                    <div>
+                      <h3>{definition()?.symbol?.name ?? "Generic symbol"}</h3>
+                      <Preview symbol />
+                      <button disabled={!definition() || busy()} onClick={genericSymbol}>
+                        Use generic symbol
+                      </button>
+                  <label>
+                    Preview unit
+                    <select
+                      aria-label="Preview symbol unit"
+                      value={previewUnit()}
+                      onChange={(e) => setPreviewUnit(+e.currentTarget.value)}
+                    >
+                      <For
+                        each={[
+                          ...new Set(
+                            definition()?.symbol?.units
+                              .map((u) => u.unit)
+                              .filter((n) => n > 0) ?? [1],
+                          ),
+                        ]}
+                      >
+                        {(n) => <option>{n}</option>}
+                      </For>
+                    </select>
+                  </label>
+                  <label>
+                    Body style
+                    <select
+                      aria-label="Preview body style"
+                      value={previewStyle()}
+                      onChange={(e) => setPreviewStyle(+e.currentTarget.value)}
+                    >
+                      <option value="1">Normal</option>
+                      <option value="2">Alternate</option>
+                    </select>
+                  </label>
+                    </div>
+                  </div>
+                  <Show when={step() === "review" && definition()}>
+                  <h3>Pin assignments</h3>
+                  <div class="component-pin-table"><table>
+                    <thead>
+                      <tr>
+                        <th>Pad</th>
+                        <th>Symbol pin</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For each={terminalNumbers(definition()!)}>
+                        {(number) => (
+                          <tr
+                            classList={{ selected: selectedPad() === number }}
+                            onClick={() => setSelectedPad(number)}
+                          >
+                            <td>{number}</td>
+                            <td>
+                              <select
+                                aria-label={`Map pad ${number}`}
+                                value={definition()!.pinMap[number] ?? ""}
+                                onChange={(e) =>
+                                  patch({
+                                    pinMap: {
+                                      ...definition()!.pinMap,
+                                      [number]: e.currentTarget.value,
+                                    },
+                                  })
+                                }
+                              >
+                                <option value="">Unmapped</option>
+                                <For
+                                  each={[
+                                    ...new Map(
+                                      definition()?.symbol?.units
+                                        .flatMap((u) => u.pins)
+                                        .map((p) => [p.number, p]) ?? [],
+                                    ).values(),
+                                  ]}
+                                >
+                                  {(p) => (
+                                    <option value={p.number}>
+                                      {p.number} - {p.name}
+                                    </option>
+                                  )}
+                                </For>
+                                <Show when={!definition()!.symbol}>
+                                  <option value={number}>{number}</option>
+                                </Show>
+                              </select>
+                            </td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table></div>
+                  </Show>
+                </div>
+              )}
+            </Show>
+          </main>
+        </div>
+        <Show when={success()}><p role="status" class="component-save-status">{success()}</p></Show>
+        <Show when={error()}>
+          <p role="alert">{error()}</p>
+        </Show>
+        <footer class="dialog-actions">
+          <button disabled={busy()} class="component-configuration-button" onClick={() => setConfiguration(v => !v)}>{configuration() ? "Back to component" : "Configuration"}</button>
+          <button onClick={props.onClose}><ActionIcon name="Close" />Close</button>
+          <Show when={!configuration() && step() !== "start"}><button disabled={busy()} onClick={back}>Back</button></Show>
+          <Show when={!configuration() && (step() === "footprint" || step() === "symbol")}><button disabled={busy() || !definition() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length} onClick={() => navigate(step() === "footprint" ? "symbol" : "review")}>Next</button></Show>
+          <Show when={!configuration() && step() === "review"}>
+          <button disabled={!definition() || busy()} onClick={() => void save()}>
+            Save to library
+          </button>
+          <Show when={props.onApply}>
+            <button
+              disabled={!definition() || busy()}
+              onClick={() => {
+                const d = definition();
+                if (d) props.onApply?.(d);
+              }}
+            >
+              Apply replacement
+            </button>
+          </Show>
+          <Show when={props.placementUnavailableReason}><span class="placement-reason">{props.placementUnavailableReason}</span></Show>
+          <button disabled={!definition() || !!props.placementUnavailableReason || busy() || configuration()} onClick={() => void save(true)}>
+            Place
+          </button>
+          </Show>
+        </footer>
+      </section>
+    </div>
+  );
+}

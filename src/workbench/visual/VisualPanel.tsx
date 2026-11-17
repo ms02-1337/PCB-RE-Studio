@@ -1,5 +1,6 @@
-import type { IssueReveal } from "../issues";
 import { createComponentEditor } from "../electrical/ComponentEditor";
+import type { IssueReveal } from "../issues";
+import { NetsSidebar } from "./NetsSidebar";
 import {
   createEffect,
   createMemo,
@@ -78,6 +79,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
     () => {
       setActiveTool(null);
       setPrompt(null);
+      components?.cancel();
     },
     () => components.open(),
   );
@@ -88,28 +90,16 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
     () => setCopperFrame((n) => n + 1),
     copper.selectLayer,
   );
-  let revealToken = 0;
   createEffect(() => {
-    const request = props.issueReveal;
-    if (!props.active || !request || request.token === revealToken || request.session !== props.store.projectSession() || request.issue.pcbId !== visual.activePcb()?.id) return;
-    revealToken = request.token;
-    queueMicrotask(() => {
-      if (request !== props.issueReveal || request.session !== props.store.projectSession() || !props.active) return;
-      const target = request.issue.target;
-      if (!target) return;
-      setActiveTool(null); setPrompt(null); components.cancel(); copper.key("Escape");
-      setCancelGeneration(n => n + 1);
-      setSelected(null);
-      copper.selectLayer(target.layerId);
-      copper.setSelected(target.traceId ?? null);
-      components.setSelected(target.componentIds?.[0] ?? "");
-      setIssueHighlight(request);
-    });
-  });
-  const [issueHighlight, setIssueHighlight] = createSignal<IssueReveal | null>(null);
-  createEffect(() => {
-    const request = issueHighlight(), target = request?.issue.target;
-    if (request && target && (request.session !== props.store.projectSession() || request.issue.pcbId !== visual.activePcb()?.id || target.layerId !== copper.layer() || (target.traceId ? copper.selected() !== target.traceId : components.selected() !== target.componentIds?.[0]))) setIssueHighlight(null);
+    if (!props.active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && components.placementActive()) {
+        e.preventDefault();
+        components.cancel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
   });
   const [flipX, setFlipX] = createSignal(false),
     [flipY, setFlipY] = createSignal(false);
@@ -156,6 +146,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
     };
   };
   const activateTool = (id: VisualToolId) => {
+    components?.cancel();
     if (activeTool() === id) {
       setActiveTool(null);
       return;
@@ -211,6 +202,45 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
     [rightOpen, setRightOpen] = createSignal(true);
   const [leftWidth, setLeftWidth] = createSignal(290),
     [rightWidth, setRightWidth] = createSignal(300);
+  /** Camera requests from the nets sidebar; the token makes each request
+   * fire exactly once in the canvas. */
+  const [focusBox, setFocusBox] = createSignal<{
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    token: number;
+  } | null>(null);
+  let focusToken = 0;
+  let revealToken = 0;
+  createEffect(() => {
+    const request = props.issueReveal;
+    if (!props.active || !request || request.token === revealToken || request.session !== props.store.projectSession() || request.issue.pcbId !== visual.activePcb()?.id) return;
+    revealToken = request.token;
+    queueMicrotask(() => {
+      if (request !== props.issueReveal || request.session !== props.store.projectSession() || !props.active) return;
+      const target = request.issue.target;
+      if (!target) return;
+      setActiveTool(null); setPrompt(null); components.cancel(); copper.key("Escape");
+      setCancelGeneration(n => n + 1);
+      setSelected(null);
+      copper.selectLayer(target.layerId);
+      copper.setSelected(target.traceId ?? null);
+      components.setSelected(target.componentIds?.[0] ?? "");
+      setIssueHighlight(request);
+    });
+  });
+  const [issueHighlight, setIssueHighlight] = createSignal<IssueReveal | null>(null);
+  createEffect(() => {
+    const request = issueHighlight(), target = request?.issue.target;
+    if (request && target && (request.session !== props.store.projectSession() || request.issue.pcbId !== visual.activePcb()?.id || target.layerId !== copper.layer() || (target.traceId ? copper.selected() !== target.traceId : components.selected() !== target.componentIds?.[0]))) setIssueHighlight(null);
+  });
+  const focusOn = (bounds: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }) => setFocusBox({ ...bounds, token: ++focusToken });
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   let settingsButton: HTMLButtonElement | undefined;
   const [busy, setBusy] = createSignal(false);
@@ -408,10 +438,17 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
     <div
       class="visual-panel"
       onKeyDown={(event) => {
-        if (event.key === "Escape") endCardDrag();
+        if (event.key === "Escape") {
+          endCardDrag();
+          if (components.placementActive()) {
+            components.cancel();
+          }
+        }
       }}
     >
       <div class="ve-toolbar" role="toolbar" aria-label="Visual editor tools">
+        <h1>Visual Editor</h1>
+        <span class="ve-tool-separator" aria-hidden="true" />
         <copper.Toolbar />
         <span class="ve-tool-separator" aria-hidden="true" />
         <For each={TOOLS}>
@@ -478,14 +515,19 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
             <Show when={leftOpen()}>
               <h2>Images</h2>
               <Show when={mirrorError()}><span role="alert">{mirrorError()}</span></Show>
-              <For each={["horizontal", "vertical"] as const}>{axis => (
-                <button
-                  aria-label={`Mirror all photographs ${axis}ly`}
-                  title={visual.activePcb()?.images.some(image => image.locked) ? "Unlock all photographs before mirroring the stack" : `Mirror all photographs ${axis}ly`}
-                  disabled={!visual.activePcb()?.images.length || visual.activePcb()!.images.some(image => image.locked) || busy()}
-                  onClick={() => mirrorAll(axis)}
-                >{axis === "horizontal" ? "?" : "?"}</button>
-              )}</For>
+              <div class="ve-heading-mirror-group">
+                <For each={["horizontal", "vertical"] as const}>{axis => (
+                  <button
+                    class="ve-icon"
+                    aria-label={`Mirror all photographs ${axis}ly`}
+                    title={visual.activePcb()?.images.some(image => image.locked) ? "Unlock all photographs before mirroring the stack" : `Mirror all photographs ${axis}ly`}
+                    disabled={!visual.activePcb()?.images.length || visual.activePcb()!.images.some(image => image.locked) || busy()}
+                    onClick={() => mirrorAll(axis)}
+                  >
+                    <ActionIcon name={axis === "horizontal" ? "Mirror horizontal" : "Mirror vertical"} />
+                  </button>
+                )}</For>
+              </div>
               <button
                 class="ve-icon ve-add-image"
                 aria-label="Add image"
@@ -502,11 +544,16 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
               </button>
             </Show>
             <button
+              class="ve-heading-toggle"
               aria-label={leftOpen() ? "Hide images" : "Show images"}
               aria-expanded={leftOpen()}
               onClick={() => setLeftOpen(!leftOpen())}
             >
-              {leftOpen() ? "‹" : "›"}
+              {leftOpen() ? (
+                <ActionIcon name="Chevron left" />
+              ) : (
+                <ActionIcon name="Chevron right" />
+              )}
             </button>
           </div>
           <Show when={leftOpen()}>
@@ -779,11 +826,15 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
                 <p class="muted">No images added.</p>
               </Show>
             </div>
+              <NetsSidebar
+                store={props.store}
+                copper={copper}
+                onFocus={focusOn}
+              />
           </Show>
         </aside>
         <Show when={leftOpen()}>{separator("left")}</Show>
         <VisualCanvas
-          issueHighlight={issueHighlight()}
           cancelGeneration={cancelGeneration()}
           copper={copper}
           components={components}
@@ -796,6 +847,8 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
           tool={activeTool()}
           flipX={flipX()}
           flipY={flipY()}
+          focusBox={focusBox}
+          issueHighlight={issueHighlight()}
           onToolEnd={() => setActiveTool(null)}
           onPrompt={(request, reply) => setPrompt({ request, reply })}
         />
@@ -810,6 +863,7 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
               <h2>Selection details</h2>
             </Show>
             <button
+              class="ve-heading-toggle"
               aria-label={
                 rightOpen()
                   ? "Hide selection details"
@@ -818,7 +872,11 @@ export function VisualPanel(props: { store: PlacementStore; active: boolean; iss
               aria-expanded={rightOpen()}
               onClick={() => setRightOpen(!rightOpen())}
             >
-              {rightOpen() ? "›" : "‹"}
+              {rightOpen() ? (
+                <ActionIcon name="Chevron right" />
+              ) : (
+                <ActionIcon name="Chevron left" />
+              )}
             </button>
           </div>
           <Show when={rightOpen()}>

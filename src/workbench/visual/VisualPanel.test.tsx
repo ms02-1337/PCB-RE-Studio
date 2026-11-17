@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from "@solidjs/testing-library";
 import { createPlacementStore } from "../placement/store";
 import { SEED_TYPES, type ProjectDoc } from "../placement/projectDoc";
 import { VisualPanel } from "./VisualPanel";
+import { centerBoxOn } from "./VisualCanvas";
 import { ValuePromptModal } from "./ValuePromptModal";
 import userEvent from "@testing-library/user-event";
 
@@ -65,6 +66,7 @@ it("dismisses the flip menu when focus leaves for a non-DOM target", () => {
 it("shows the tool toolbar with gated enablement and independent PCB tabs", () => {
   render(() => <VisualPanel store={store} active />);
   const tools = screen.getByRole("toolbar", { name: "Visual editor tools" });
+  expect(within(tools).getByRole("heading", { name: "Visual Editor" })).toBeTruthy();
   const buttons = within(tools).getAllByRole("button");
   // The copper placement tools are icon-only (aria-labels carry their names).
   expect(buttons.map((button) => button.textContent)).toEqual(["", "", "", "", "", "Measure", "Calibrate", "Rotate", "Align", "Crop", "Resize", "Deskew", "", "", ""]);
@@ -497,6 +499,8 @@ it("mirrors all photos, blocks locks, and cancels the existing-work warning", ()
   store.visual.addImage(store.visual.activePcb()!.id, asset, "Back", 200, 120);
   render(() => <VisualPanel store={store} active />);
   const button = screen.getByRole("button", { name: "Mirror all photographs horizontally" });
+  expect(button.querySelector("svg.action-icon")).toBeTruthy();
+  expect(button.textContent).toBe("");
   fireEvent.click(screen.getByRole("button", { name: "Measure" }));
   fireEvent.click(button);
   expect(screen.getByRole("button", { name: "Measure" }).getAttribute("aria-pressed")).toBe("false");
@@ -514,4 +518,20 @@ it("mirrors all photos, blocks locks, and cancels the existing-work warning", ()
   fireEvent.click(button);
   expect(confirm).toHaveBeenCalled();
   expect(JSON.stringify(store.doc())).toBe(before);
+});
+
+it("centers a world box in view with the zoom clamped", () => {
+  // Comfortable margin, centered on both axes
+  const centered = centerBoxOn({ left: 0, right: 10, top: 0, bottom: 10 }, 200, 200);
+  expect(centered.scale).toBe(8);
+  expect(centered.offsetX + 5 * centered.scale).toBe(100);
+  expect(centered.offsetY + 5 * centered.scale).toBe(100);
+
+  // Tiny elements never zoom in unbounded
+  expect(centerBoxOn({ left: 0, right: 1, top: 0, bottom: 1 }, 2000, 2000).scale).toBe(8);
+
+  // Large elements zoom out to fit and stay centered
+  const wide = centerBoxOn({ left: 0, right: 1000, top: 0, bottom: 1000 }, 200, 200);
+  expect(wide.scale).toBeCloseTo(120 / 1000, 6);
+  expect(wide.offsetX + 500 * wide.scale).toBeCloseTo(100, 4);
 });

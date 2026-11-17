@@ -26,6 +26,14 @@ export function ActionIcon(props: { name: string }) {
           contains "CW") or right, like the feather rotate icons. */}
       <Match when={/ccw/i.test(props.name)}><path d="M.8 3.3v5h5M2.9 12.5a7.5 7.5 0 1 0 1.8-7.8L.8 8.3" /></Match>
       <Match when={/cw|rotate/i.test(props.name)}><path d="M19.2 3.3v5h-5M17.1 12.5a7.5 7.5 0 1 1-1.8-7.8l3.9 4.1" /></Match>
+      <Match when={/recycle|replace|swap|refresh|reload/i.test(props.name)}><path d="M16.1 3.5v4.3h-4.3M3.9 7.8A6.5 6.5 0 0 1 16.1 7.8M3.9 16.5v-4.3h4.3M16.1 12.2A6.5 6.5 0 0 1 3.9 12.2" /></Match>
+      <Match when={/alert|error|warning|issue/i.test(props.name)}><path d="M10 2.5L1.5 17.5h17L10 2.5zM10 7.5v4.5m0 2.5v.01" /></Match>
+      {/* Directional chevrons for collapsible sections; a bare "chevron"
+          falls back to pointing down. */}
+      <Match when={/chevron[- ]?left/i.test(props.name)}><path d="M12 5l-5 5 5 5" /></Match>
+      <Match when={/chevron[- ]?right/i.test(props.name)}><path d="M8 5l5 5-5 5" /></Match>
+      <Match when={/chevron[- ]?up/i.test(props.name)}><path d="M5 12l5-5 5 5" /></Match>
+      <Match when={/chevron/i.test(props.name)}><path d="M5 8l5 5 5-5" /></Match>
       {/* Mirrored triangle pairs: split by a vertical axis (horizontal
           mirror) or a horizontal axis (vertical mirror). */}
       <Match when={/mirror/i.test(props.name) && /vertical/i.test(props.name)}><path d="M3 10h14M6 3l4 5 4-5zM6 17l4-5 4 5z" /></Match>

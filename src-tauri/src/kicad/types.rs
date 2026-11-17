@@ -99,6 +99,8 @@ pub struct ComponentDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<Symbol>,
     pub pin_map: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nc_pins: Option<Vec<String>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

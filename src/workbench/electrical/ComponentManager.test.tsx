@@ -37,8 +37,7 @@ it("zooms and middle-drags each preview independently, and Fit resets its view",
  setup();const methods:Record<string,ReturnType<typeof vi.fn>>={};const ctx=new Proxy({} as CanvasRenderingContext2D,{get:(_,key)=>methods[String(key)]??=vi.fn(),set:()=>true});vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(ctx);
  const canvas=screen.getByLabelText("Footprint preview");fireEvent.wheel(canvas,{deltaY:-500,clientX:200,clientY:130});const zoomed=methods.scale.mock.calls[0][0],originalX=methods.translate.mock.calls[0][0];methods.scale.mockClear();methods.translate.mockClear();
  fireEvent.pointerDown(canvas,{button:1,clientX:200,clientY:130});fireEvent.pointerMove(canvas,{clientX:230,clientY:150});expect(methods.translate.mock.calls[0][0]).toBeCloseTo(originalX+30);fireEvent.pointerUp(canvas);methods.translate.mockClear();fireEvent.pointerMove(canvas,{clientX:300,clientY:180});expect(methods.translate).not.toHaveBeenCalled();
- methods.scale.mockClear();
- fireEvent.pointerDown(canvas,{button:0,clientX:200,clientY:130});fireEvent.pointerMove(canvas,{clientX:240,clientY:160});expect(methods.translate.mock.calls[0][0]).toBeCloseTo(originalX+40);fireEvent.pointerUp(canvas);methods.translate.mockClear();
+ fireEvent.pointerDown(canvas,{button:0,clientX:230,clientY:150});fireEvent.pointerMove(canvas,{clientX:240,clientY:160});expect(methods.translate.mock.calls[0][0]).toBeCloseTo(originalX+30+10);fireEvent.pointerUp(canvas);methods.translate.mockClear();methods.scale.mockClear();
  fireEvent.click(screen.getByRole("button",{name:"Fit footprint preview"}));expect(methods.scale.mock.calls[0][0]).toBeLessThan(zoomed);expect(screen.queryByLabelText("Preview symbol unit")).toBeNull();expect(screen.queryByLabelText("Preview body style")).toBeNull();
 });
 
@@ -53,12 +52,15 @@ it("pans preview with left-drag and suppresses click selection on drag release",
  const padRow = screen.getByRole("row", { name: /1.*1/ });
  expect(padRow.classList.contains("selected")).toBe(false);
 
- // Left-drag pans and sets didDrag flag
+ // Left-drag starts at pad (200, 130) and pans to (240, 170), releasing over the pad's new position
  fireEvent.pointerDown(canvas, { button: 0, clientX: 200, clientY: 130 });
  fireEvent.pointerMove(canvas, { clientX: 240, clientY: 170 });
  fireEvent.pointerUp(canvas);
  fireEvent.click(canvas, { clientX: 240, clientY: 170 });
  expect(padRow.classList.contains("selected")).toBe(false);
+
+ // Reset view so pad is back at center (200, 130)
+ fireEvent.click(screen.getByRole("button", { name: "Fit footprint preview" }));
 
  // Plain left-click without drag selects the pad
  fireEvent.pointerDown(canvas, { button: 0, clientX: 200, clientY: 130 });
@@ -117,15 +119,17 @@ it("renders footprint and symbol library browser with col-name, centered col-sou
   await waitFor(() => expect(screen.getByRole("button", { name: "Use footprint" })).toBeTruthy());
   const table = screen.getByRole("table");
   const headers = within(table).getAllByRole("columnheader");
-  expect(headers.map((h) => h.textContent)).toEqual(["Name", "Source", "Actions"]);
+  expect(headers.map((h) => h.textContent)).toEqual(["Name", "Source", "Pins", "Actions"]);
   expect(headers[0].classList.contains("col-name")).toBe(true);
   expect(headers[1].classList.contains("col-source")).toBe(true);
-  expect(headers[2].classList.contains("col-actions")).toBe(true);
+  expect(headers[2].classList.contains("col-pin-count")).toBe(true);
+  expect(headers[3].classList.contains("col-actions")).toBe(true);
   const row = screen.getByRole("button", { name: "Use footprint" }).closest("tr")!;
   const cells = within(row).getAllByRole("cell");
   expect(cells[0].classList.contains("col-name")).toBe(true);
   expect(cells[1].classList.contains("col-source")).toBe(true);
-  expect(cells[2].classList.contains("col-actions")).toBe(true);
+  expect(cells[2].classList.contains("col-pin-count")).toBe(true);
+  expect(cells[3].classList.contains("col-actions")).toBe(true);
 });
 
 it("renders saved components with Name, Footprint, Symbol, Actions and prevents deleting in-use components",async()=>{setup(undefined,null,(d)=>d.id==="d");fireEvent.click(screen.getByRole("button",{name:"Use saved component"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Load"})).toBeTruthy());const table=screen.getByRole("table");expect(within(table).getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Name","Footprint","Symbol","Actions"]);const headers=within(table).getAllByRole("columnheader");expect(headers[0].classList.contains("col-name")).toBe(true);expect(headers[1].classList.contains("col-footprint")).toBe(true);expect(headers[2].classList.contains("col-symbol")).toBe(true);expect(headers[3].classList.contains("col-actions")).toBe(true);const row=screen.getByRole("button",{name:"Load"}).closest("tr")!;const cells=within(row).getAllByRole("cell");expect(cells[0].textContent).toBe("Connector");expect(cells[0].classList.contains("col-name")).toBe(true);expect(cells[1].textContent).toBe("Connector footprint");expect(cells[1].classList.contains("col-footprint")).toBe(true);expect(cells[2].textContent).toBe("Generic");expect(cells[2].classList.contains("col-symbol")).toBe(true);expect(cells[3].classList.contains("col-actions")).toBe(true);expect(within(cells[3]).getAllByRole("button")).toHaveLength(3);const deleteBtn=screen.getByRole("button",{name:"Delete Connector"}) as HTMLButtonElement;expect(deleteBtn.disabled).toBe(true);expect(deleteBtn.getAttribute("title")).toBe("Cannot delete: component is in use on the board");expect(screen.queryByRole("separator")).toBeNull();});
@@ -160,4 +164,65 @@ it("shows discard confirmation when footprint is selected and keeps editing or d
  expect(screen.getByRole("dialog", { name: "Discard component draft" })).toBeTruthy();
  fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("shows cached pin counts without loading library geometry and distinguishes unknown from zero", async () => {
+  setup(undefined, null);
+  vi.mocked(kicad.search).mockResolvedValue({entries:[
+    {id:"pins",name:"Connector",sourceId:"s",kind:"footprint",pinCount:24},
+    {id:"zero",name:"Mechanical",sourceId:"s",kind:"footprint",pinCount:0},
+    {id:"old",name:"Legacy",sourceId:"s",kind:"footprint"}],total:3});
+  const load=vi.spyOn(kicad,"footprint");
+  fireEvent.click(screen.getByRole("button",{name:"Create new component"}));
+  await waitFor(()=>expect(screen.getByRole("columnheader",{name:"Pins"})).toBeTruthy());
+  await waitFor(()=>expect(screen.getByText("24")).toBeTruthy());
+  expect(screen.getByText("0")).toBeTruthy();
+  expect(screen.getByTitle("Rescan this library source to index pin counts.").textContent).toBe("\u2014");
+  expect(load).not.toHaveBeenCalled();
+});
+
+it("provides a dedicated replacement workspace with independent searches and only replacement actions", async () => {
+  const symbol = {id:"s",name:"Original symbol",source:"",raw:"",reference:"U",diagnostics:[],units:[{unit:1,bodyStyle:1,graphics:[],pins:[{number:"A",name:"Pin",x:0,y:0,rotation:0,length:1,electricalType:"passive",hidden:false}]}]};
+  const original={...structuredClone(definition),symbol,pinMap:{"1":"A"}};
+  vi.spyOn(kicad,"sources").mockResolvedValue([]); vi.spyOn(kicad,"definitions").mockResolvedValue([]);
+  const search=vi.spyOn(kicad,"search").mockImplementation(async kind=>({entries:[{id:kind==="footprint"?"new-fp":"new-symbol",name:kind==="footprint"?"New footprint":"New symbol",sourceId:"source",kind,pinCount:1}],total:1}));
+  vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(null);
+  vi.spyOn(kicad,"footprint").mockResolvedValue({...original.footprint,id:"new-fp",name:"New footprint"});
+  vi.spyOn(kicad,"symbol").mockResolvedValue({...symbol,id:"new-symbol",name:"New symbol"});
+  const apply=vi.fn(),place=vi.fn();const save=vi.spyOn(kicad,"saveDefinition");
+  render(()=><ComponentManager initial={original} onClose={()=>{}} onPlace={place} onApply={apply} />);
+  expect(screen.queryByRole("button",{name:"Place"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"Save to library"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"Main screen"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"Back"})).toBeNull();
+  expect(screen.queryByRole("navigation",{name:"Component setup steps"})).toBeNull();
+  const bottom=document.querySelector(".component-replacement-mode .component-review-bottom") as HTMLElement;
+  expect(bottom).toBeTruthy();
+  const info=bottom.querySelector(".component-review-info") as HTMLElement;
+  const pins=bottom.querySelector(".component-review-pins") as HTMLElement;
+  expect(info).toBeTruthy();
+  expect(pins).toBeTruthy();
+  expect(within(info).getByLabelText("Component name")).toBeTruthy();
+  expect(within(info).getByLabelText("Component referencePrefix")).toBeTruthy();
+  expect(within(pins).getByRole("heading",{name:"Pin assignments"})).toBeTruthy();
+  expect(document.querySelector(".component-replacement-mode > .component-review-info")).toBeNull();
+  const fp=screen.getByRole("region",{name:"Replacement footprints"});
+  const sym=screen.getByRole("region",{name:"Replacement symbols"});
+  fireEvent.input(screen.getByLabelText("Search replacement footprint"),{target:{value:"connector"}});
+  fireEvent.input(screen.getByLabelText("Search replacement symbol"),{target:{value:"header"}});
+  await waitFor(()=>expect(search).toHaveBeenCalledWith("footprint","connector",0,50));
+  await waitFor(()=>expect(search).toHaveBeenCalledWith("symbol","header",0,50));
+  await waitFor(()=>expect(within(fp).getByRole("button",{name:"Use footprint"})).toBeTruthy());
+  fireEvent.click(within(fp).getByRole("button",{name:"Use footprint"}));
+  await waitFor(()=>expect(screen.getByRole("heading",{name:"New footprint"})).toBeTruthy());
+  await waitFor(()=>expect(within(sym).getByRole("button",{name:"Use symbol"})).toHaveProperty("disabled",false));
+  expect(screen.getByLabelText("Map pad 1")).toHaveProperty("value","A");
+  expect(screen.getByText("Original symbol")).toBeTruthy();
+  fireEvent.click(within(sym).getByRole("button",{name:"Use symbol"}));
+  await waitFor(()=>expect(screen.getByRole("heading",{name:"New symbol"})).toBeTruthy());
+  fireEvent.input(screen.getByLabelText("Component name"),{target:{value:"Revised connector"}});
+  fireEvent.click(screen.getByRole("button",{name:"Apply replacement"}));
+  expect(apply).toHaveBeenCalledWith(expect.objectContaining({name:"Revised connector",footprint:expect.objectContaining({id:"new-fp"}),symbol:expect.objectContaining({id:"new-symbol"}),pinMap:{"1":"A"}}));
+  expect(place).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();
+  expect(original.footprint.id).toBe("fp");
 });

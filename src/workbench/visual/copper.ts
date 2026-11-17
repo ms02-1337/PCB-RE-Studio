@@ -337,6 +337,104 @@ export function mergeNets(pcb: VisualPcb, ids: string[], survivor: string) {
   pcb.nets = pcb.nets?.filter((n) => !ids.includes(n.id) || n.id === survivor);
 }
 
+/** One member of a net: a component pad or a copper element, with the data
+ * the net tables, the elements modal and canvas focusing all need. */
+export interface NetElement {
+  kind: "pad" | "trace" | "via" | "zone";
+  /** Copper elements use their own id; pads use the owning component id. */
+  id: string;
+  /** Pad terminal number; absent for copper elements. */
+  terminal?: string;
+  name: string;
+  layerId?: string;
+  comment?: string;
+  /** World-space AABB for canvas focusing. */
+  bounds: { left: number; right: number; top: number; bottom: number };
+}
+
+/** Every element assigned to a net: component terminals first, then traces,
+ * vias and zones — the single source for counts, listings and navigation. */
+export function netElements(pcb: VisualPcb, netId: string): NetElement[] {
+  const pxPerMm = pcb.pxPerMm ?? 1;
+  const out: NetElement[] = [];
+  for (const c of pcb.components ?? [])
+    for (const t of c.terminals ?? []) {
+      if (t.netId !== netId) continue;
+      const pad = c.definition.footprint.pads.find(
+        (p) => p.number === t.number,
+      );
+      const center = pad ? padPoint(c, pad, pxPerMm) : { x: c.x, y: c.y };
+      const radius = pad ? Math.max(pad.width, pad.height) / 2 : 2;
+      out.push({
+        kind: "pad",
+        id: c.id,
+        terminal: t.number,
+        name: `${c.reference} pin ${t.number}`,
+        layerId: c.layerId,
+        comment: t.comment,
+        bounds: {
+          left: center.x - radius,
+          right: center.x + radius,
+          top: center.y - radius,
+          bottom: center.y + radius,
+        },
+      });
+    }
+  for (const t of pcb.traces ?? []) {
+    if (t.netId !== netId) continue;
+    const xs = t.points.map((p) => p.x);
+    const ys = t.points.map((p) => p.y);
+    const left = Math.min(...xs) - t.width / 2;
+    const right = Math.max(...xs) + t.width / 2;
+    const top = Math.min(...ys) - t.width / 2;
+    const bottom = Math.max(...ys) + t.width / 2;
+    const widthMm = pcb.pxPerMm ? (t.width / pxPerMm).toFixed(2) : "0.00";
+    const lengthMm = pcb.pxPerMm ? (length(t.points) / pxPerMm).toFixed(2) : "0.00";
+    out.push({
+      kind: "trace",
+      id: t.id,
+      name: `Trace ${t.id} (${widthMm}mm, ${lengthMm}mm)`,
+      layerId: t.layerId,
+      comment: t.comment,
+      bounds: { left, right, top, bottom },
+    });
+  }
+  for (const v of pcb.vias ?? []) {
+    if (v.netId !== netId) continue;
+    out.push({
+      kind: "via",
+      id: v.id,
+      name: `Via ${v.id} (Ø ${(v.diameter / pxPerMm).toFixed(2)}mm)`,
+      comment: v.comment,
+      bounds: {
+        left: v.x - v.diameter / 2,
+        right: v.x + v.diameter / 2,
+        top: v.y - v.diameter / 2,
+        bottom: v.y + v.diameter / 2,
+      },
+    });
+  }
+  for (const z of pcb.zones ?? []) {
+    if (z.netId !== netId) continue;
+    const xs = z.points.map((p) => p.x);
+    const ys = z.points.map((p) => p.y);
+    out.push({
+      kind: "zone",
+      id: z.id,
+      name: `Zone ${z.id} (${z.points.length} vertices)`,
+      layerId: z.layerId,
+      comment: z.comment,
+      bounds: {
+        left: Math.min(...xs),
+        right: Math.max(...xs),
+        top: Math.min(...ys),
+        bottom: Math.max(...ys),
+      },
+    });
+  }
+  return out;
+}
+
 /** Passive census only: a zone never electrically joins its contents. */
 export function zoneCensus(
   pcb: VisualPcb,

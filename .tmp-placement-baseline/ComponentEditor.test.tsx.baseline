@@ -1,0 +1,263 @@
+import * as domain from "./domain";
+import { beforeEach, afterEach, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { createPlacementStore } from "../placement/store";
+import { SEED_TYPES, type ProjectDoc } from "../placement/projectDoc";
+import { createComponentEditor } from "./ComponentEditor";
+import type { ComponentDefinition } from "../../bridge/kicad";
+let store: ReturnType<typeof createPlacementStore>,
+  editor: ReturnType<typeof createComponentEditor>;
+const definition: ComponentDefinition = {
+  id: "d",
+  name: "D",
+  partName: "",
+  value: "",
+  referencePrefix: "U",
+  pinMap: { "1": "1", "2": "2" },
+  footprint: {
+    id: "f",
+    name: "F",
+    source: "",
+    raw: "",
+    graphics: [],
+    diagnostics: [],
+    pads: [
+      {
+        number: "1",
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 2,
+        shape: "rect",
+        rotation: 0,
+        plated: false,
+        layers: ["F.Cu"],
+      },
+      {
+        number: "2",
+        x: 10,
+        y: 0,
+        width: 2,
+        height: 2,
+        shape: "rect",
+        rotation: 0,
+        plated: false,
+        layers: ["F.Cu"],
+      },
+    ],
+  },
+};
+beforeEach(async () => {
+  const doc: ProjectDoc = {
+    schemaVersion: 1,
+    name: "test",
+    createdAt: "t",
+    updatedAt: "t",
+    types: SEED_TYPES,
+    boards: [],
+    components: [],
+    assets: {},
+  };
+  store = createPlacementStore({
+    openProject: async () => ({ doc, assets: {}, path: "test.pcbre" }),
+    save: vi.fn(),
+  });
+  await store.openProject("test.pcbre");
+  store.configureAutosave({ enabled: false, delayMs: 2000 });
+  store.visual.calibratePcb(1);
+  render(() => {
+    editor = createComponentEditor(
+      store,
+      () => store.visual.activePcb()!.layers[0],
+      () => true,
+      () => {},
+    );
+    return (
+      <>
+        <editor.Inspector />
+        <editor.Manager />
+      </>
+    );
+  });
+});
+afterEach(() => store.dispose());
+it("places independent terminals and updates only physically connected group", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+  fireEvent.change(screen.getByLabelText("Net for U1 pad 1"), {
+    target: { value: "new" },
+  });
+  const c = store.visual.activePcb()!.components![0];
+  expect(c.terminals[0].netId).toBeTruthy();
+  expect(c.terminals[1].netId).toBeUndefined();
+  expect(store.visual.activePcb()!.schematic!.units).toHaveLength(1);
+});
+it("does not commit a stale component drag after undo removes it", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+  store.undo();
+  expect(() => editor.up({ x: 20, y: 0 })).not.toThrow();
+  expect(store.visual.activePcb()!.components ?? []).toHaveLength(0);
+});
+it("cancels all placement geometry and net changes when conflicting contact is declined", () => {
+  const p = structuredClone(store.visual.activePcb()!);
+  p.nets = [
+    { id: "a", name: "A", color: "#ff0000" },
+    { id: "b", name: "B", color: "#00ff00" },
+  ];
+  p.traces = [
+    {
+      id: "a",
+      layerId: p.layers[0],
+      width: 1,
+      netId: "a",
+      points: [
+        { x: -2, y: 0 },
+        { x: 2, y: 0 },
+      ],
+    },
+    {
+      id: "b",
+      layerId: p.layers[0],
+      width: 1,
+      netId: "b",
+      points: [
+        { x: 0, y: -2 },
+        { x: 0, y: 2 },
+      ],
+    },
+  ];
+  store.visual.replacePcb(p);
+  const before = JSON.stringify(store.doc());
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  expect(
+    screen.getByRole("dialog", { name: "Join component nets" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(JSON.stringify(store.doc())).toBe(before);
+});
+it("moves explicitly anchored endpoints without moving coincident opposite-layer traces", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  const p = structuredClone(store.visual.activePcb()!),
+    c = p.components![0];
+  p.traces = [
+    {
+      id: "attached",
+      layerId: p.layers[0],
+      points: [
+        { x: 0, y: 0 },
+        { x: -20, y: 0 },
+      ],
+      width: 0.3,
+      startPad: { componentId: c.id, terminal: "1" },
+    },
+    {
+      id: "opposite",
+      layerId: p.layers[1],
+      points: [
+        { x: 0, y: 0 },
+        { x: -20, y: 0 },
+      ],
+      width: 0.3,
+    },
+  ];
+  store.visual.replacePcb(p);
+  editor.down({ x: 0, y: 0 });
+  editor.move({ x: 5, y: 0 });
+  editor.up({ x: 5, y: 0 });
+  const next = store.visual.activePcb()!;
+  expect(next.traces![0].points[0]).toEqual({ x: 5, y: 0 });
+  expect(next.traces![1].points[0]).toEqual({ x: 0, y: 0 });
+  store.undo();
+  expect(store.visual.activePcb()!.components![0].x).toBe(0);
+});
+it("rejects a blank reference without changing the document", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+  const before = JSON.stringify(store.doc());
+  fireEvent.change(screen.getByLabelText("Component reference"), {
+    target: { value: "   " },
+  });
+  expect(JSON.stringify(store.doc())).toBe(before);
+  expect(screen.getByRole("alert").textContent).toMatch(/References/);
+});
+it("reconciles schematic connected pins when assigning a terminal to another net", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  const p = structuredClone(store.visual.activePcb()!),
+    c = p.components![0],
+    other = structuredClone(c);
+  other.id = "second";
+  other.reference = "U2";
+  other.x = 100;
+  p.components!.push(other);
+  p.nets = [
+    { id: "a", name: "A", color: "#ff0000" },
+    { id: "b", name: "B", color: "#00ff00" },
+  ];
+  c.terminals[0].netId = "a";
+  other.terminals[0].netId = "a";
+  p.schematic!.wires = [
+    {
+      id: "wire",
+      netId: "a",
+      points: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      start: { componentId: c.id, terminal: "1" },
+      end: { componentId: other.id, terminal: "1" },
+    },
+  ];
+  store.visual.replacePcb(p);
+  editor.down({ x: 0, y: 0 });
+  fireEvent.change(screen.getByLabelText("Net for U1 pad 1"), {
+    target: { value: "b" },
+  });
+  expect(
+    screen.getByRole("dialog", { name: "Join component nets" }),
+  ).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Surviving net"), {
+    target: { value: "b" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Merge and apply" }));
+  expect(
+    store.visual.activePcb()!.components!.map((c) => c.terminals[0].netId),
+  ).toEqual(["b", "b"]);
+  expect(store.visual.activePcb()!.schematic!.wires[0].netId).toBe("b");
+});
+it("rotates an armed footprint with R and selects its empty body", () => {
+  editor.arm(definition);
+  editor.key("r");
+  editor.down({ x: 0, y: 0 });
+  expect(store.visual.activePcb()!.components![0].rotation).toBe(90);
+  editor.key("Escape");
+  expect(editor.down({ x: 0, y: 5 })).toBe(true);
+  expect(editor.current()?.reference).toBe("U1");
+});
+it("renders a transient component drag without writing the document", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 5, y: 0 });
+  const before = JSON.stringify(store.doc());
+  editor.move({ x: 15, y: 0 });
+  const draw = vi.spyOn(domain, "drawFootprint").mockImplementation(() => {});
+  try {
+    editor.draw({} as CanvasRenderingContext2D);
+    expect(draw.mock.calls[0][1].x).toBe(10);
+    expect(JSON.stringify(store.doc())).toBe(before);
+  } finally {
+    draw.mockRestore();
+  }
+});

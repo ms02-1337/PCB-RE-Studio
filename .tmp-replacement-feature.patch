@@ -1,0 +1,287 @@
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -49,3 +49,5 @@
+ Copper takes hit-test priority over component bodies in the Visual Editor. Editing trace vertices reuses drawing snap targets (same-layer traces/pads and through-vias); Shift bypasses snapping, and endpoint pad anchors update on commit.
+ 
+ The KiCad footprint/symbol browser shows a Pins column from index metadata, counting distinct numbered electrical terminals rather than duplicate pads. Unknown legacy counts show a dash with a rescan hint.
++
++Changing an existing component footprint/symbol opens a dedicated replacement review: information fields at the top, independent side-by-side footprint/symbol search tables, paired previews, then pin assignments. It exposes Close and Apply replacement rather than create/save/place actions. Replacing one definition retains the other and preserves valid pin mappings; the content can scroll inside the fixed dialog.
+--- a/src/workbench/electrical/ComponentManager.test.tsx
++++ b/src/workbench/electrical/ComponentManager.test.tsx
+@@ -180,3 +180,39 @@
+   expect(screen.getByTitle("Rescan this library source to index pin counts.").textContent).toBe("\u2014");
+   expect(load).not.toHaveBeenCalled();
+ });
++
++it("provides a dedicated replacement workspace with independent searches and only replacement actions", async () => {
++  const symbol = {id:"s",name:"Original symbol",source:"",raw:"",reference:"U",diagnostics:[],units:[{unit:1,bodyStyle:1,graphics:[],pins:[{number:"A",name:"Pin",x:0,y:0,rotation:0,length:1,electricalType:"passive",hidden:false}]}]};
++  const original={...structuredClone(definition),symbol,pinMap:{"1":"A"}};
++  vi.spyOn(kicad,"sources").mockResolvedValue([]); vi.spyOn(kicad,"definitions").mockResolvedValue([]);
++  const search=vi.spyOn(kicad,"search").mockImplementation(async kind=>({entries:[{id:kind==="footprint"?"new-fp":"new-symbol",name:kind==="footprint"?"New footprint":"New symbol",sourceId:"source",kind,pinCount:1}],total:1}));
++  vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(null);
++  vi.spyOn(kicad,"footprint").mockResolvedValue({...original.footprint,id:"new-fp",name:"New footprint"});
++  vi.spyOn(kicad,"symbol").mockResolvedValue({...symbol,id:"new-symbol",name:"New symbol"});
++  const apply=vi.fn(),place=vi.fn();const save=vi.spyOn(kicad,"saveDefinition");
++  render(()=><ComponentManager initial={original} onClose={()=>{}} onPlace={place} onApply={apply} />);
++  expect(screen.queryByRole("button",{name:"Place"})).toBeNull();
++  expect(screen.queryByRole("button",{name:"Save to library"})).toBeNull();
++  expect(screen.queryByRole("button",{name:"Main screen"})).toBeNull();
++  expect(screen.queryByRole("button",{name:"Back"})).toBeNull();
++  expect(screen.queryByRole("navigation",{name:"Component setup steps"})).toBeNull();
++  const fp=screen.getByRole("region",{name:"Replacement footprints"});
++  const sym=screen.getByRole("region",{name:"Replacement symbols"});
++  fireEvent.input(screen.getByLabelText("Search replacement footprint"),{target:{value:"connector"}});
++  fireEvent.input(screen.getByLabelText("Search replacement symbol"),{target:{value:"header"}});
++  await waitFor(()=>expect(search).toHaveBeenCalledWith("footprint","connector",0,50));
++  await waitFor(()=>expect(search).toHaveBeenCalledWith("symbol","header",0,50));
++  await waitFor(()=>expect(within(fp).getByRole("button",{name:"Use footprint"})).toBeTruthy());
++  fireEvent.click(within(fp).getByRole("button",{name:"Use footprint"}));
++  await waitFor(()=>expect(screen.getByRole("heading",{name:"New footprint"})).toBeTruthy());
++  await waitFor(()=>expect(within(sym).getByRole("button",{name:"Use symbol"})).toHaveProperty("disabled",false));
++  expect(screen.getByLabelText("Map pad 1")).toHaveProperty("value","A");
++  expect(screen.getByText("Original symbol")).toBeTruthy();
++  fireEvent.click(within(sym).getByRole("button",{name:"Use symbol"}));
++  await waitFor(()=>expect(screen.getByRole("heading",{name:"New symbol"})).toBeTruthy());
++  fireEvent.input(screen.getByLabelText("Component name"),{target:{value:"Revised connector"}});
++  fireEvent.click(screen.getByRole("button",{name:"Apply replacement"}));
++  expect(apply).toHaveBeenCalledWith(expect.objectContaining({name:"Revised connector",footprint:expect.objectContaining({id:"new-fp"}),symbol:expect.objectContaining({id:"new-symbol"}),pinMap:{"1":"A"}}));
++  expect(place).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();
++  expect(original.footprint.id).toBe("fp");
++});
+--- a/src/workbench/electrical/ComponentManager.tsx
++++ b/src/workbench/electrical/ComponentManager.tsx
+@@ -28,6 +28,7 @@
+   onApply?: (d: ComponentDefinition) => void;
+   isInUse?: (d: ComponentDefinition) => boolean;
+ }) {
++  const replacementMode = () => Boolean(props.onApply);
+   const isComponentInUse = (d: ComponentDefinition) => Boolean(props.isInUse?.(d));
+   type Step = "start" | "saved" | "footprint" | "symbol" | "review";
+   const [step, setStep] = createSignal<Step>(props.initial ? "review" : "start");
+@@ -78,6 +79,9 @@
+   };
+   onMount(() => {
+     void refresh();
++    queueMicrotask(() => {
++      if (alive && replacementMode()) dialog?.querySelector<HTMLInputElement>(".component-review-info input")?.focus();
++    });
+   });
+   createEffect(() => {
+     revision();
+@@ -117,11 +121,16 @@
+           value: d?.value ?? "",
+           referencePrefix: d?.referencePrefix ?? "U",
+           footprint: fp,
+-          symbol: undefined,
++          symbol: replacementMode() ? d?.symbol : undefined,
+           pinMap: {},
+           ncPins: d?.ncPins ?? [],
+         };
+-        next.pinMap = Object.fromEntries(terminalNumbers(next).map(n => [n,n]));
++        const pins = new Set(next.symbol?.units.flatMap(u => u.pins.map(p => p.number)));
++        next.pinMap = Object.fromEntries(terminalNumbers(next).map(n => {
++          const previous = replacementMode() ? d?.pinMap[n] : undefined;
++          return [n, next.symbol ? (previous && pins.has(previous) ? previous : pins.has(n) ? n : "") : n];
++        }));
++        next.ncPins = next.ncPins?.filter(n => terminalNumbers(next).includes(n));
+         setDefinition(next);
+       }
+     } else {
+@@ -129,9 +138,13 @@
+       if (symbol && alive)
+         patch({
+           symbol,
+-          pinMap: Object.fromEntries(terminalNumbers(definition()!).map(n => [n, symbol.units.some(u => u.pins.some(p => p.number === n)) ? n : ""])),
++          pinMap: Object.fromEntries(terminalNumbers(definition()!).map(n => {
++            const previous = definition()?.pinMap[n];
++            const exists = (number: string) => symbol.units.some(u => u.pins.some(p => p.number === number));
++            return [n, previous && exists(previous) ? previous : exists(n) ? n : ""];
++          })),
+           referencePrefix:
+-            definition()?.referencePrefix === "U"
++            !replacementMode() && definition()?.referencePrefix === "U"
+               ? symbol.reference
+               : definition()?.referencePrefix,
+         });
+@@ -209,6 +222,58 @@
+   createEffect(()=>{step();configuration();finishSplit(true);});
+   onCleanup(()=>finishSplit(true));
+   const [selectedPad, setSelectedPad] = createSignal("");
++  const ComponentInformation = () => <Show when={definition()}><div class="component-review-info">
++                          <h3>Information</h3>
++                          <div class="component-fields">
++                            <For each={["name", "partName", "value", "referencePrefix"] as const}>
++                              {(key) => (
++                                <label>
++                                  {
++                                    ({
++                                      name: "Name",
++                                      partName: "Part number",
++                                      value: "Value",
++                                      referencePrefix: "Reference prefix",
++                                    })[key]
++                                  }
++                                  <input
++                                    aria-label={`Component ${key}`}
++                                    value={definition()![key]}
++                                    onInput={(e) => patch({ [key]: e.currentTarget.value })}
++                                  />
++                                </label>
++                              )}
++                            </For>
++                          </div>
++                        </div></Show>;
++  const ReplacementBrowser = (panel: { kind: "footprint" | "symbol" }) => {
++    const [search,setSearch] = createSignal(""), [page,setPage] = createSignal(0);
++    const [rows,setRows] = createSignal<LibraryEntry[]>([]), [count,setCount] = createSignal(0);
++    const [pending,setPending] = createSignal(false), [failure,setFailure] = createSignal("");
++    let token = 0, mounted = true;
++    onCleanup(() => { mounted = false; });
++    createEffect(() => {
++      revision(); const q = search(), offset = page(), current = ++token;
++      setPending(true); setFailure(""); setRows([]);
++      void kicad.search(panel.kind,q,offset,50).then(result => {
++        if (mounted && alive && current === token) { setRows(result.entries); setCount(result.total); }
++      }).catch(e => { if (mounted && alive && current === token) setFailure(e instanceof Error ? e.message : String(e)); })
++        .finally(() => { if (mounted && alive && current === token) setPending(false); });
++    });
++    return <section class="component-replacement-browser" aria-label={panel.kind === "footprint" ? "Replacement footprints" : "Replacement symbols"}>
++      <div class="component-browser-controls"><h3>{panel.kind === "footprint" ? "Footprint" : "Symbol"}</h3>
++        <label>Search <input aria-label={`Search replacement ${panel.kind}`} value={search()} onInput={e => {setSearch(e.currentTarget.value);setPage(0);}} /></label>
++        <Show when={panel.kind === "symbol"}><button disabled={busy()} onClick={genericSymbol}>Use generic symbol</button></Show>
++      </div>
++      <div class="library-results" aria-busy={pending()}><Show when={!pending()} fallback={<div class="component-library-loading" role="status"><span class="component-library-spinner" aria-hidden="true" />Loading KiCad library</div>}>
++        <table><thead><tr><th>Name</th><th class="col-source">Source</th><th class="col-pin-count">Pins</th><th class="col-actions">Actions</th></tr></thead><tbody>
++          <For each={rows()}>{entry => <tr classList={{selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id}}><td>{entry.name}</td><td class="col-source">{sources().find(source => source.id === entry.sourceId)?.name ?? entry.sourceId}</td><td class="col-pin-count">{entry.pinCount ?? "\u2014"}</td><td class="col-actions"><button disabled={busy()} onClick={() => void choose(entry)}>Use {panel.kind}</button></td></tr>}</For>
++        </tbody></table><Show when={!rows().length && !failure()}><p>No matching library entries.</p></Show>
++      </Show></div>
++      <Show when={failure()}><p role="alert">{failure()}</p></Show>
++      <div class="component-pagination"><button disabled={pending() || !page()} onClick={() => setPage(Math.max(0,page()-50))}>Previous page</button><span>{count() ? page()+1 : 0}-{Math.min(page()+50,count())} / {count()}</span><button disabled={pending() || page()+50>=count()} onClick={() => setPage(page()+50)}>Next page</button></div>
++    </section>;
++  };
+   const Preview = (p: { symbol?: boolean; title?: string }) => {
+     const [zoom,setZoom]=createSignal(1), [pan,setPan]=createSignal({x:0,y:0}), [size,setSize]=createSignal({width:400,height:260});
+     let canvas!: HTMLCanvasElement, surface!: HTMLDivElement;
+@@ -365,7 +430,8 @@
+         </header>
+         <div class="component-manager-body">
+           <div hidden={!configuration()} class="component-configuration"><LibrarySettings onChanged={() => { void refresh(); setRevision(n => n + 1); }} /></div>
+-          <main hidden={configuration()} data-step={step()}>
++          <main hidden={configuration()} data-step={step()} classList={{"component-replacement-mode": replacementMode()}}>
++            <Show when={replacementMode()}><h3>Replace footprint / symbol</h3><ComponentInformation /><div class="component-replacement-tables"><ReplacementBrowser kind="footprint" /><ReplacementBrowser kind="symbol" /></div></Show>
+             <Show when={step() === "start"}>
+               <section class="component-start">
+                 <div class="component-start-hero">
+@@ -413,7 +479,7 @@
+                 </div>
+               </section>
+             </Show>
+-            <Show when={step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span><div class="component-step-actions">          <Show when={!configuration() && step() !== "start"}><button class="component-step-btn component-step-back" disabled={busy()} onClick={back}>Back</button><button class="component-step-btn component-step-home" disabled={busy()} onClick={goToStart} title="Return to main screen">Main screen</button></Show>
++            <Show when={!replacementMode() && step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span><div class="component-step-actions">          <Show when={!configuration() && step() !== "start"}><button class="component-step-btn component-step-back" disabled={busy()} onClick={back}>Back</button><button class="component-step-btn component-step-home" disabled={busy()} onClick={goToStart} title="Return to main screen">Main screen</button></Show>
+           <Show when={!configuration() && (step() === "footprint" || step() === "symbol")}><button class="component-step-btn component-step-next" disabled={busy() || !definition() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length} onClick={() => navigate(step() === "footprint" ? "symbol" : "review")}>Next</button></Show>
+ </div></nav></Show>
+             <div ref={region} class="component-workspace" data-resizable={step() === "footprint" || step() === "symbol"} style={{"--library-list-height":`${split().size}px`}}>
+@@ -475,32 +541,8 @@
+                     <Preview symbol title={definition()?.symbol?.name ?? "Generic symbol"} />
+                   </div>
+                   <Show when={step() === "review" && definition()}>
+-                    {(d) => (
+                       <div class="component-review-bottom">
+-                        <div class="component-review-info">
+-                          <h3>Information</h3>
+-                          <div class="component-fields">
+-                            <For each={["name", "partName", "value", "referencePrefix"] as const}>
+-                              {(key) => (
+-                                <label>
+-                                  {
+-                                    ({
+-                                      name: "Name",
+-                                      partName: "Part number",
+-                                      value: "Value",
+-                                      referencePrefix: "Reference prefix",
+-                                    })[key]
+-                                  }
+-                                  <input
+-                                    aria-label={`Component ${key}`}
+-                                    value={d()[key]}
+-                                    onInput={(e) => patch({ [key]: e.currentTarget.value })}
+-                                  />
+-                                </label>
+-                              )}
+-                            </For>
+-                          </div>
+-                        </div>
++                        <Show when={!replacementMode()}><ComponentInformation /></Show>
+                         <div class="component-review-pins">
+                           <h3>Pin assignments</h3>
+                           <div class="component-pin-table">
+@@ -585,7 +627,6 @@
+                           </div>
+                         </div>
+                       </div>
+-                    )}
+                   </Show>
+                 </div>
+               )}
+@@ -598,28 +639,28 @@
+           <p role="alert">{error()}</p>
+         </Show>
+         <footer class="dialog-actions">
+-          <button disabled={busy()} class="component-configuration-button" onClick={() => setConfiguration(v => !v)}>{configuration() ? "Back to component" : "Configuration"}</button>
++          <Show when={!replacementMode()}><button disabled={busy()} class="component-configuration-button" onClick={() => setConfiguration(v => !v)}>{configuration() ? "Back to component" : "Configuration"}</button></Show>
+           <button onClick={handleRequestClose}><ActionIcon name="Close" />Close</button>
+           <Show when={!configuration() && step() === "review"}>
+-          <button disabled={busy()} onClick={goToStart}>Main screen</button>
++          <Show when={!replacementMode()}><button disabled={busy()} onClick={goToStart}>Main screen</button>
+           <button disabled={!definition() || busy()} onClick={() => void save()}>
+             Save to library
+-          </button>
++          </button></Show>
+           <Show when={props.onApply}>
+             <button
+-              disabled={!definition() || busy()}
++              disabled={!definition()?.name.trim() || busy() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length}
+               onClick={() => {
+                 const d = definition();
+-                if (d) props.onApply?.(d);
++                if (d) props.onApply?.(structuredClone(d));
+               }}
+             >
+               Apply replacement
+             </button>
+           </Show>
+-          <Show when={props.placementUnavailableReason}><span class="placement-reason">{props.placementUnavailableReason}</span></Show>
++          <Show when={!replacementMode()}><Show when={props.placementUnavailableReason}><span class="placement-reason">{props.placementUnavailableReason}</span></Show>
+           <button disabled={!definition() || !!props.placementUnavailableReason || busy() || configuration()} onClick={() => void save(true)}>
+             Place
+-          </button>
++          </button></Show>
+           </Show>
+         </footer>
+       </section>
+--- a/src/workbench/visual/visual.css
++++ b/src/workbench/visual/visual.css
+@@ -1351,3 +1351,23 @@
+ }
+ 
+ .component-manager .component-browser .col-pin-count { width: 1%; white-space: nowrap; text-align: center; }
++
++/* Replacement is a single review workspace, independent of the create wizard. */
++.component-manager .component-manager-body > main.component-replacement-mode { overflow: auto; display: block; }
++.component-replacement-mode > h3 { margin: 0 0 10px; }
++.component-replacement-mode > .component-review-info .component-fields { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); }
++.component-replacement-tables { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 12px 0; }
++.component-replacement-browser { min-width: 0; border: 1px solid var(--border); padding: 10px; }
++.component-replacement-browser .component-browser-controls { flex-wrap: wrap; }
++.component-replacement-browser .component-browser-controls label { flex: 1; min-width: 100px; }
++.component-replacement-browser input { width: 100%; height: 30px; padding: 4px 8px; margin: 0; box-sizing: border-box; }
++.component-manager .component-replacement-browser .library-results { height: clamp(130px,20dvh,220px); max-height: 220px; overflow: auto; }
++.component-replacement-browser .col-source,.component-replacement-browser .col-actions { text-align: center; }
++.component-replacement-browser .col-actions { width: 1%; white-space: nowrap; }
++.component-replacement-mode .component-workspace { min-height: 0; flex: none; display: block; }
++.component-replacement-mode .component-preview-stage { display: block; }
++.component-replacement-mode .component-previews { height: clamp(200px,25dvh,300px); }
++.component-replacement-mode .component-review-bottom { display: block; min-height: 0; }
++.component-replacement-mode .component-review-pins { margin-top: 12px; }
++.component-replacement-mode .component-review-pins .component-pin-table { max-height: 240px; overflow: auto; }
++@media(max-width:800px) { .component-replacement-mode > .component-review-info .component-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } }

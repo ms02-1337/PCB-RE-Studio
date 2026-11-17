@@ -28,6 +28,7 @@ export function ComponentManager(props: {
   onApply?: (d: ComponentDefinition) => void;
   isInUse?: (d: ComponentDefinition) => boolean;
 }) {
+  const replacementMode = () => Boolean(props.onApply);
   const isComponentInUse = (d: ComponentDefinition) => Boolean(props.isInUse?.(d));
   type Step = "start" | "saved" | "footprint" | "symbol" | "review";
   const [step, setStep] = createSignal<Step>(props.initial ? "review" : "start");
@@ -78,6 +79,9 @@ export function ComponentManager(props: {
   };
   onMount(() => {
     void refresh();
+    queueMicrotask(() => {
+      if (alive && replacementMode()) dialog?.querySelector<HTMLInputElement>(".component-review-info input")?.focus();
+    });
   });
   createEffect(() => {
     revision();
@@ -117,11 +121,16 @@ export function ComponentManager(props: {
           value: d?.value ?? "",
           referencePrefix: d?.referencePrefix ?? "U",
           footprint: fp,
-          symbol: undefined,
+          symbol: replacementMode() ? d?.symbol : undefined,
           pinMap: {},
           ncPins: d?.ncPins ?? [],
         };
-        next.pinMap = Object.fromEntries(terminalNumbers(next).map(n => [n,n]));
+        const pins = new Set(next.symbol?.units.flatMap(u => u.pins.map(p => p.number)));
+        next.pinMap = Object.fromEntries(terminalNumbers(next).map(n => {
+          const previous = replacementMode() ? d?.pinMap[n] : undefined;
+          return [n, next.symbol ? (previous && pins.has(previous) ? previous : pins.has(n) ? n : "") : n];
+        }));
+        next.ncPins = next.ncPins?.filter(n => terminalNumbers(next).includes(n));
         setDefinition(next);
       }
     } else {
@@ -129,9 +138,13 @@ export function ComponentManager(props: {
       if (symbol && alive)
         patch({
           symbol,
-          pinMap: Object.fromEntries(terminalNumbers(definition()!).map(n => [n, symbol.units.some(u => u.pins.some(p => p.number === n)) ? n : ""])),
+          pinMap: Object.fromEntries(terminalNumbers(definition()!).map(n => {
+            const previous = definition()?.pinMap[n];
+            const exists = (number: string) => symbol.units.some(u => u.pins.some(p => p.number === number));
+            return [n, previous && exists(previous) ? previous : exists(n) ? n : ""];
+          })),
           referencePrefix:
-            definition()?.referencePrefix === "U"
+            !replacementMode() && definition()?.referencePrefix === "U"
               ? symbol.reference
               : definition()?.referencePrefix,
         });
@@ -209,6 +222,58 @@ export function ComponentManager(props: {
   createEffect(()=>{step();configuration();finishSplit(true);});
   onCleanup(()=>finishSplit(true));
   const [selectedPad, setSelectedPad] = createSignal("");
+  const ComponentInformation = () => <Show when={definition()}><div class="component-review-info">
+                          <h3>Information</h3>
+                          <div class="component-fields">
+                            <For each={["name", "partName", "value", "referencePrefix"] as const}>
+                              {(key) => (
+                                <label>
+                                  {
+                                    ({
+                                      name: "Name",
+                                      partName: "Part number",
+                                      value: "Value",
+                                      referencePrefix: "Reference prefix",
+                                    })[key]
+                                  }
+                                  <input
+                                    aria-label={`Component ${key}`}
+                                    value={definition()![key]}
+                                    onInput={(e) => patch({ [key]: e.currentTarget.value })}
+                                  />
+                                </label>
+                              )}
+                            </For>
+                          </div>
+                        </div></Show>;
+  const ReplacementBrowser = (panel: { kind: "footprint" | "symbol" }) => {
+    const [search,setSearch] = createSignal(""), [page,setPage] = createSignal(0);
+    const [rows,setRows] = createSignal<LibraryEntry[]>([]), [count,setCount] = createSignal(0);
+    const [pending,setPending] = createSignal(false), [failure,setFailure] = createSignal("");
+    let token = 0, mounted = true;
+    onCleanup(() => { mounted = false; });
+    createEffect(() => {
+      revision(); const q = search(), offset = page(), current = ++token;
+      setPending(true); setFailure(""); setRows([]);
+      void kicad.search(panel.kind,q,offset,50).then(result => {
+        if (mounted && alive && current === token) { setRows(result.entries); setCount(result.total); }
+      }).catch(e => { if (mounted && alive && current === token) setFailure(e instanceof Error ? e.message : String(e)); })
+        .finally(() => { if (mounted && alive && current === token) setPending(false); });
+    });
+    return <section class="component-replacement-browser" aria-label={panel.kind === "footprint" ? "Replacement footprints" : "Replacement symbols"}>
+      <div class="component-browser-controls"><h3>{panel.kind === "footprint" ? "Footprint" : "Symbol"}</h3>
+        <label>Search <input aria-label={`Search replacement ${panel.kind}`} value={search()} onInput={e => {setSearch(e.currentTarget.value);setPage(0);}} /></label>
+        <Show when={panel.kind === "symbol"}><button disabled={busy()} onClick={genericSymbol}>Use generic symbol</button></Show>
+      </div>
+      <div class="library-results" aria-busy={pending()}><Show when={!pending()} fallback={<div class="component-library-loading" role="status"><span class="component-library-spinner" aria-hidden="true" />Loading KiCad library</div>}>
+        <table><thead><tr><th>Name</th><th class="col-source">Source</th><th class="col-pin-count">Pins</th><th class="col-actions">Actions</th></tr></thead><tbody>
+          <For each={rows()}>{entry => <tr classList={{selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id}}><td>{entry.name}</td><td class="col-source">{sources().find(source => source.id === entry.sourceId)?.name ?? entry.sourceId}</td><td class="col-pin-count">{entry.pinCount ?? "\u2014"}</td><td class="col-actions"><button disabled={busy()} onClick={() => void choose(entry)}>Use {panel.kind}</button></td></tr>}</For>
+        </tbody></table><Show when={!rows().length && !failure()}><p>No matching library entries.</p></Show>
+      </Show></div>
+      <Show when={failure()}><p role="alert">{failure()}</p></Show>
+      <div class="component-pagination"><button disabled={pending() || !page()} onClick={() => setPage(Math.max(0,page()-50))}>Previous page</button><span>{count() ? page()+1 : 0}-{Math.min(page()+50,count())} / {count()}</span><button disabled={pending() || page()+50>=count()} onClick={() => setPage(page()+50)}>Next page</button></div>
+    </section>;
+  };
   const Preview = (p: { symbol?: boolean; title?: string }) => {
     const [zoom,setZoom]=createSignal(1), [pan,setPan]=createSignal({x:0,y:0}), [size,setSize]=createSignal({width:400,height:260});
     let canvas!: HTMLCanvasElement, surface!: HTMLDivElement;
@@ -365,7 +430,8 @@ export function ComponentManager(props: {
         </header>
         <div class="component-manager-body">
           <div hidden={!configuration()} class="component-configuration"><LibrarySettings onChanged={() => { void refresh(); setRevision(n => n + 1); }} /></div>
-          <main hidden={configuration()} data-step={step()}>
+          <main hidden={configuration()} data-step={step()} classList={{"component-replacement-mode": replacementMode()}}>
+            <Show when={replacementMode()}><h3>Replace footprint / symbol</h3><div class="component-replacement-tables"><ReplacementBrowser kind="footprint" /><ReplacementBrowser kind="symbol" /></div></Show>
             <Show when={step() === "start"}>
               <section class="component-start">
                 <div class="component-start-hero">
@@ -413,7 +479,7 @@ export function ComponentManager(props: {
                 </div>
               </section>
             </Show>
-            <Show when={step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span><div class="component-step-actions">          <Show when={!configuration() && step() !== "start"}><button class="component-step-btn component-step-back" disabled={busy()} onClick={back}>Back</button><button class="component-step-btn component-step-home" disabled={busy()} onClick={goToStart} title="Return to main screen">Main screen</button></Show>
+            <Show when={!replacementMode() && step() !== "start"}><nav class="component-steps" aria-label="Component setup steps"><span aria-current={step() === "saved" || step() === "footprint" ? "step" : undefined}>{savedFlow() ? "1. Saved component" : "1. Footprint"}</span><Show when={!savedFlow()}><span aria-current={step() === "symbol" ? "step" : undefined}>2. Symbol</span></Show><span aria-current={step() === "review" ? "step" : undefined}>{savedFlow() ? "2" : "3"}. Information and pin assignments</span><div class="component-step-actions">          <Show when={!configuration() && step() !== "start"}><button class="component-step-btn component-step-back" disabled={busy()} onClick={back}>Back</button><button class="component-step-btn component-step-home" disabled={busy()} onClick={goToStart} title="Return to main screen">Main screen</button></Show>
           <Show when={!configuration() && (step() === "footprint" || step() === "symbol")}><button class="component-step-btn component-step-next" disabled={busy() || !definition() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length} onClick={() => navigate(step() === "footprint" ? "symbol" : "review")}>Next</button></Show>
 </div></nav></Show>
             <div ref={region} class="component-workspace" data-resizable={step() === "footprint" || step() === "symbol"} style={{"--library-list-height":`${split().size}px`}}>
@@ -426,8 +492,8 @@ export function ComponentManager(props: {
 
               </div>
               <Show when={importStatus()}><p role="status" aria-label="Import result" class="component-import-status">{importStatus()}</p></Show>
-              <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results" aria-busy={loading() && kind() !== "saved"}><Show when={!loading() || kind() === "saved"} fallback={<div class="component-library-loading" role="status" aria-live="polite"><span class="component-library-spinner" aria-hidden="true" /><strong>Loading KiCad library</strong><span>Fetching {kind() === "symbol" ? "symbols" : "footprints"}...</span></div>}><table><thead><tr><th class="col-name">Name</th><Show when={kind() === "saved"} fallback={<th class="col-source">Source</th>}><th class="col-footprint">Footprint</th><th class="col-symbol">Symbol</th></Show><th class="col-actions">Actions</th></tr></thead><tbody>
-                <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td class="col-name">{entry.name}</td><td class="col-source">{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td class="col-actions"><div class="component-row-actions"><button disabled={busy() || loading() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></div></td></tr>}</For>}>
+              <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results" aria-busy={loading() && kind() !== "saved"}><Show when={!loading() || kind() === "saved"} fallback={<div class="component-library-loading" role="status" aria-live="polite"><span class="component-library-spinner" aria-hidden="true" /><strong>Loading KiCad library</strong><span>Fetching {kind() === "symbol" ? "symbols" : "footprints"}...</span></div>}><table><thead><tr><th class="col-name">Name</th><Show when={kind() === "saved"} fallback={<><th class="col-source">Source</th><th class="col-pin-count">Pins</th></>}><th class="col-footprint">Footprint</th><th class="col-symbol">Symbol</th></Show><th class="col-actions">Actions</th></tr></thead><tbody>
+                <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td class="col-name">{entry.name}</td><td class="col-source">{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td class="col-pin-count" title={entry.pinCount === undefined ? "Rescan this library source to index pin counts." : "Distinct numbered electrical terminals"}>{entry.pinCount ?? "\u2014"}</td><td class="col-actions"><div class="component-row-actions"><button disabled={busy() || loading() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></div></td></tr>}</For>}>
                   <For each={saved().filter(d => d.name.toLowerCase().includes(query().toLowerCase())).sort((a,b) => a.name.localeCompare(b.name))}>{d => {
                     const inUse = isComponentInUse(d);
                     return (
@@ -475,32 +541,8 @@ export function ComponentManager(props: {
                     <Preview symbol title={definition()?.symbol?.name ?? "Generic symbol"} />
                   </div>
                   <Show when={step() === "review" && definition()}>
-                    {(d) => (
                       <div class="component-review-bottom">
-                        <div class="component-review-info">
-                          <h3>Information</h3>
-                          <div class="component-fields">
-                            <For each={["name", "partName", "value", "referencePrefix"] as const}>
-                              {(key) => (
-                                <label>
-                                  {
-                                    ({
-                                      name: "Name",
-                                      partName: "Part number",
-                                      value: "Value",
-                                      referencePrefix: "Reference prefix",
-                                    })[key]
-                                  }
-                                  <input
-                                    aria-label={`Component ${key}`}
-                                    value={d()[key]}
-                                    onInput={(e) => patch({ [key]: e.currentTarget.value })}
-                                  />
-                                </label>
-                              )}
-                            </For>
-                          </div>
-                        </div>
+                        <ComponentInformation />
                         <div class="component-review-pins">
                           <h3>Pin assignments</h3>
                           <div class="component-pin-table">
@@ -585,7 +627,6 @@ export function ComponentManager(props: {
                           </div>
                         </div>
                       </div>
-                    )}
                   </Show>
                 </div>
               )}
@@ -598,28 +639,28 @@ export function ComponentManager(props: {
           <p role="alert">{error()}</p>
         </Show>
         <footer class="dialog-actions">
-          <button disabled={busy()} class="component-configuration-button" onClick={() => setConfiguration(v => !v)}>{configuration() ? "Back to component" : "Configuration"}</button>
+          <Show when={!replacementMode()}><button disabled={busy()} class="component-configuration-button" onClick={() => setConfiguration(v => !v)}>{configuration() ? "Back to component" : "Configuration"}</button></Show>
           <button onClick={handleRequestClose}><ActionIcon name="Close" />Close</button>
           <Show when={!configuration() && step() === "review"}>
-          <button disabled={busy()} onClick={goToStart}>Main screen</button>
+          <Show when={!replacementMode()}><button disabled={busy()} onClick={goToStart}>Main screen</button>
           <button disabled={!definition() || busy()} onClick={() => void save()}>
             Save to library
-          </button>
+          </button></Show>
           <Show when={props.onApply}>
             <button
-              disabled={!definition() || busy()}
+              disabled={!definition()?.name.trim() || busy() || !!definition()?.footprint.diagnostics.length || !!definition()?.symbol?.diagnostics.length}
               onClick={() => {
                 const d = definition();
-                if (d) props.onApply?.(d);
+                if (d) props.onApply?.(structuredClone(d));
               }}
             >
               Apply replacement
             </button>
           </Show>
-          <Show when={props.placementUnavailableReason}><span class="placement-reason">{props.placementUnavailableReason}</span></Show>
+          <Show when={!replacementMode()}><Show when={props.placementUnavailableReason}><span class="placement-reason">{props.placementUnavailableReason}</span></Show>
           <button disabled={!definition() || !!props.placementUnavailableReason || busy() || configuration()} onClick={() => void save(true)}>
             Place
-          </button>
+          </button></Show>
           </Show>
         </footer>
       </section>

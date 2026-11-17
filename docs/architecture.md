@@ -60,3 +60,5 @@ Visual PCB components carry stable numbered terminals, physical placement and op
 Schematic/BOM projections live in src/workbench/electrical. Export generates private KiCad 9 symbols and project-local libraries, preserves explicit net assignments with labels, and writes an atomic ZIP through Rust. Unsupported or ambiguous electrical data blocks export rather than producing lossy connectivity.
 
 Whole-stack photograph mirroring left-composes a shared world reflection into every image warp and anchor about the bounds center of all photos. Hidden photos participate; any locked photo blocks the entire operation. One document mutation preserves registration and undo, without resampling or changing electrical geometry, calibration, layer assignments or image order.
+
+KiCad search entries cache optional pinCount during indexing/import (distinct numbered electrical pads or symbol pins across units/styles and inheritance). Search reads registry metadata only; legacy entries omit the count until rescan. Invalid inheritance yields an unknown count, never a guessed zero. No project-schema change.

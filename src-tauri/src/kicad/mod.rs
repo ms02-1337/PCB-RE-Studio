@@ -1,5 +1,6 @@
 pub mod codec;
 pub mod commands;
+mod counts;
 pub mod import;
 pub mod parser;
 pub mod sexpr;
@@ -30,6 +31,8 @@ pub struct LibrarySource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol_name: Option<String>,
     pub id: String,
@@ -118,9 +121,11 @@ pub const MAX_SYMBOLS_PER_FILE: usize = 10_000;
 /// Entry identity depends only on the canonical file path (plus symbol name),
 /// so imported entries and a later rescan of the same source never duplicate.
 pub fn index_file(source_id: &str, path: &Path, raw: &str) -> ProjectResult<Vec<LibraryEntry>> {
+    let metadata = counts::counts(raw).unwrap_or_default();
     let source_path = path.to_string_lossy().into_owned();
     if path.extension().is_some_and(|e| e == "kicad_mod") {
         return Ok(vec![LibraryEntry {
+            pin_count: metadata.get("").copied().flatten(),
             id: parser::hash(&source_path),
             symbol_name: None,
             name: format!(
@@ -144,6 +149,7 @@ pub fn index_file(source_id: &str, path: &Path, raw: &str) -> ProjectResult<Vec<
     Ok(names
         .into_iter()
         .map(|name| LibraryEntry {
+            pin_count: metadata.get(&name).copied().flatten(),
             id: parser::hash(&format!("{source_path}::{name}")),
             name: format!(
                 "{}:{name}",
@@ -333,8 +339,20 @@ pub fn validate_definition(d: &ComponentDefinition) -> ProjectResult<()> {
         let pads: std::collections::HashSet<_> =
             d.footprint.pads.iter().map(|p| p.number.as_str()).collect();
         for (pad, pin) in &d.pin_map {
+            if pin.is_empty() {
+                continue;
+            }
             if !pads.contains(pad.as_str()) || !pins.contains(pin.as_str()) {
                 return Err(sexpr::error("Pin map refers to missing pad or symbol pin."));
+            }
+        }
+    }
+    if let Some(nc_pins) = &d.nc_pins {
+        let pads: std::collections::HashSet<_> =
+            d.footprint.pads.iter().map(|p| p.number.as_str()).collect();
+        for pad in nc_pins {
+            if !pads.contains(pad.as_str()) {
+                return Err(sexpr::error("NC pin refers to missing pad."));
             }
         }
     }

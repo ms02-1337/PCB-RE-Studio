@@ -1,0 +1,544 @@
+--- a/src/workbench/electrical/ComponentManager.tsx
++++ b/src/workbench/electrical/ComponentManager.tsx
+@@ -6,6 +6,7 @@
+   onCleanup,
+   onMount,
+ } from "solid-js";
++import { LibrarySettings } from "./LibrarySettings";
+ import { ActionIcon } from "../ActionIcon";
+ import {
+   kicad,
+@@ -19,6 +20,7 @@
+   initial?: ComponentDefinition;
+   onClose: () => void;
+   onPlace: (d: ComponentDefinition) => void;
++  placementUnavailableReason?: string;
+   onApply?: (d: ComponentDefinition) => void;
+ }) {
+   const [definition, setDefinition] = createSignal<
+@@ -26,15 +28,16 @@
+     >(props.initial ? structuredClone(props.initial) : undefined),
+     [saved, setSaved] = createSignal<ComponentDefinition[]>([]),
+     [sources, setSources] = createSignal<LibrarySource[]>([]),
+-    [path, setPath] = createSignal(""),
++    [configuration, setConfiguration] = createSignal(false),
++    [revision, setRevision] = createSignal(0),
++    [loading, setLoading] = createSignal(false),
+     [query, setQuery] = createSignal(""),
+-    [kind, setKind] = createSignal<"footprint" | "symbol">("footprint"),
++    [kind, setKind] = createSignal<"saved" | "footprint" | "symbol">("footprint"),
+     [entries, setEntries] = createSignal<LibraryEntry[]>([]),
+     [total, setTotal] = createSignal(0),
+     [offset, setOffset] = createSignal(0),
+     [error, setError] = createSignal(""),
+-    [status, setStatus] = createSignal(""),
+-    [job, setJob] = createSignal(""),
++
+     [busy, setBusy] = createSignal(false);
+   let alive = true,
+     request = 0;
+@@ -64,16 +67,20 @@
+     void refresh();
+   });
+   createEffect(() => {
++    revision();
+     const q = query(),
+       k = kind(),
+       o = offset(),
+       token = ++request;
+-    void guard(() => kicad.search(k, q, o, 50)).then((page) => {
++    if (k === "saved") return;
++    setLoading(true);
++    void kicad.search(k, q, o, 50).then((page) => {
+       if (page && alive && token === request) {
++        setLoading(false);
+         setEntries(page.entries);
+         setTotal(page.total);
+       }
+-    });
++    }).catch(e => { if (alive && token === request) setError(e instanceof Error ? e.message : String(e)); }).finally(() => { if (alive && token === request) setLoading(false); });
+   });
+   const patch = (values: Partial<ComponentDefinition>) =>
+     setDefinition((d) => (d ? { ...d, ...values } : d));
+@@ -109,32 +116,9 @@
+     }
+     setBusy(false);
+   };
+-  const scan = async (id: string) => {
+-    const started = await guard(() => kicad.rescan(id));
+-    if (!started) return;
+-    setJob(started.id);
+-    let current = started;
+-    while (alive && current.status === "running") {
+-      setStatus(`Indexing ${current.scanned} / ${current.total}`);
+-      await new Promise((r) => setTimeout(r, 200));
+-      const result = await guard(() => kicad.job(started.id));
+-      if (!result) break;
+-      current = result;
+-    }
+-    if (alive) {
+-      setJob("");
+-      setStatus(
+-        current.status === "done"
+-          ? "Index ready"
+-          : (current.error ?? current.status),
+-      );
+-      void refresh();
+-      setQuery(query() + " ");
+-    }
+-  };
+   const save = async (place = false) => {
+     const d = definition();
+-    if (!d) return;
++    if (!d || (place && props.placementUnavailableReason)) return;
+     if (!d.name.trim()) {
+       setError("Enter a component name.");
+       return;
+@@ -291,7 +275,7 @@
+               e.currentTarget.querySelectorAll<HTMLElement>(
+                 "button:not([disabled]),input:not([disabled]),select:not([disabled])",
+               ),
+-            );
++            ).filter(item => !item.closest("[hidden]"));
+             if (e.shiftKey && document.activeElement === items[0]) {
+               e.preventDefault();
+               items.at(-1)?.focus();
+@@ -306,181 +290,39 @@
+           <h2>Component library</h2>
+         </header>
+         <div class="component-manager-body">
+-          <aside>
+-            <h3>Saved components</h3>
+-            <button autofocus onClick={() => setDefinition(undefined)}>
+-              New component
+-            </button>
+-            <For each={saved()}>
+-              {(d) => (
+-                <div>
+-                  <button onClick={() => setDefinition(structuredClone(d))}>
+-                    {d.name}
+-                  </button>
+-                  <button
+-                    aria-label={`Duplicate ${d.name}`}
+-                    onClick={() =>
+-                      setDefinition({
+-                        ...structuredClone(d),
+-                        id: visualId(),
+-                        name: d.name + " copy",
+-                      })
+-                    }
+-                  >
+-                    Duplicate
+-                  </button>
+-                  <button
+-                    aria-label={`Delete ${d.name}`}
+-                    onClick={() => {
+-                      if (
+-                        confirm(
+-                          `Delete local definition ${d.name}? Placed components stay unchanged.`,
+-                        )
+-                      )
+-                        void guard(() => kicad.deleteDefinition(d.id)).then(
+-                          refresh,
+-                        );
+-                    }}
+-                  >
+-                    Delete
+-                  </button>
+-                </div>
+-              )}
+-            </For>
+-            <h3>Library sources</h3>
+-            <input
+-              aria-label="Library path"
+-              value={path()}
+-              onInput={(e) => setPath(e.currentTarget.value)}
+-              placeholder="KiCad install, library directory or file"
+-            />
+-            <button
+-              onClick={() =>
+-                void guard(() => kicad.addSource(path())).then((s) => {
+-                  if (s) {
+-                    void refresh();
+-                    void scan(s.id);
+-                  }
+-                })
+-              }
+-            >
+-              Add source
+-            </button>
+-            <For each={sources()}>
+-              {(s) => (
+-                <div>
+-                  <span title={s.path}>{s.name}</span>
+-                  <button onClick={() => void scan(s.id)}>Rescan</button>
+-                  <button
+-                    onClick={() =>
+-                      void guard(() => kicad.removeSource(s.id)).then(refresh)
+-                    }
+-                  >
+-                    Remove
+-                  </button>
+-                  <For each={s.diagnostics}>{(d) => <p>{d}</p>}</For>
+-                </div>
+-              )}
+-            </For>
+-            <p role="status">{status()}</p>
+-            <Show when={job()}>
+-              <button onClick={() => void kicad.cancel(job())}>
+-                Cancel indexing
+-              </button>
+-            </Show>
+-          </aside>
+-          <main>
+-            <div class="component-pickers">
+-              <select
+-                aria-label="Library kind"
+-                value={kind()}
+-                onChange={(e) => {
+-                  setKind(e.currentTarget.value as "footprint" | "symbol");
+-                  setOffset(0);
+-                }}
+-              >
+-                <option value="footprint">Footprints</option>
+-                <option value="symbol">Symbols</option>
+-              </select>
+-              <input
+-                aria-label="Search library"
+-                value={query()}
+-                onInput={(e) => {
+-                  setQuery(e.currentTarget.value);
+-                  setOffset(0);
+-                }}
+-              />
+-              <div class="library-results">
+-                <For each={entries()}>
+-                  {(e) => (
+-                    <button
+-                      disabled={
+-                        busy() || (e.kind === "symbol" && !definition())
+-                      }
+-                      onClick={() => void choose(e)}
+-                    >
+-                      {e.name}
+-                    </button>
+-                  )}
+-                </For>
++          <div hidden={!configuration()} class="component-configuration"><LibrarySettings onChanged={() => { void refresh(); setRevision(n => n + 1); }} /></div>
++          <main hidden={configuration()}>
++            <Show when={definition()}>{d => <div class="component-fields">
++              <For each={["name", "partName", "value", "referencePrefix"] as const}>{key => <label>{({ name: "Name", partName: "Part number", value: "Value", referencePrefix: "Reference prefix" })[key]}<input aria-label={`Component ${key}`} value={d()[key]} onInput={e => patch({ [key]: e.currentTarget.value })} /></label>}</For>
++            </div>}</Show>
++            <section class="component-browser" aria-label="Library browser">
++              <div class="component-browser-controls">
++                <div role="tablist" aria-label="Library kind"><For each={["saved", "footprint", "symbol"] as const}>{tab => <button role="tab" aria-controls="component-library-results" tabIndex={kind() === tab ? 0 : -1} onKeyDown={e => { const tabs = ["saved", "footprint", "symbol"] as const; const i = tabs.indexOf(tab); const n = e.key === "ArrowRight" ? (i+1)%3 : e.key === "ArrowLeft" ? (i+2)%3 : e.key === "Home" ? 0 : e.key === "End" ? 2 : -1; if(n >= 0) { e.preventDefault(); setKind(tabs[n]); setOffset(0); (e.currentTarget.parentElement?.children[n] as HTMLElement)?.focus(); } }} aria-selected={kind() === tab} onClick={() => { setKind(tab); setOffset(0); }}>{({saved:"Saved components",footprint:"Footprints",symbol:"Symbols"})[tab]}</button>}</For></div>
++                <label>Search <input autofocus aria-label="Search library" value={query()} onInput={e => { setQuery(e.currentTarget.value); setOffset(0); }} /></label>
++                <button onClick={() => { setDefinition(undefined); setKind("footprint"); }}>New component</button>
+               </div>
+-              <button
+-                disabled={!offset()}
+-                onClick={() => setOffset(Math.max(0, offset() - 50))}
+-              >
+-                Previous
+-              </button>
+-              <span>
+-                {offset() + 1}-{Math.min(offset() + 50, total())} / {total()}
+-              </span>
+-              <button
+-                disabled={offset() + 50 >= total()}
+-                onClick={() => setOffset(offset() + 50)}
+-              >
+-                Next
+-              </button>
+-            </div>
+-            <Show when={definition()} keyed>
+-              {(d) => (
++              <div class="library-results" id="component-library-results" role="tabpanel" aria-label="Library results"><table><thead><tr><th>Name</th><th>Source / Footprint</th><th>Actions</th></tr></thead><tbody>
++                <Show when={kind() === "saved"} fallback={<For each={entries()}>{entry => <tr classList={{ selected: definition()?.footprint.id === entry.id || definition()?.symbol?.id === entry.id }}><td>{entry.name}</td><td>{sources().find(s => s.id === entry.sourceId)?.name ?? entry.sourceId}</td><td><button disabled={busy() || (entry.kind === "symbol" && !definition())} onClick={() => void choose(entry)}>Use {entry.kind}</button></td></tr>}</For>}>
++                  <For each={saved().filter(d => d.name.toLowerCase().includes(query().toLowerCase())).sort((a,b) => a.name.localeCompare(b.name))}>{d => <tr classList={{ selected: definition()?.id === d.id }}><td>{d.name}</td><td>{d.footprint.name}</td><td><button onClick={() => setDefinition(structuredClone(d))}>Load</button><button aria-label={`Duplicate ${d.name}`} onClick={() => setDefinition({ ...structuredClone(d), id: visualId(), name: d.name + " copy" })}>Duplicate</button><button aria-label={`Delete ${d.name}`} onClick={() => { if (confirm(`Delete local definition ${d.name}? Placed components stay unchanged.`)) void guard(() => kicad.deleteDefinition(d.id)).then(refresh); }}>Delete</button></td></tr>}</For>
++                </Show>
++              </tbody></table></div>
++              <Show when={kind() !== "saved"}><div class="component-pagination"><button disabled={!offset()} onClick={() => setOffset(Math.max(0,offset()-50))}>Previous</button><span role="status">{loading() ? "Loading..." : `${total() ? offset()+1 : 0}-${Math.min(offset()+50,total())} / ${total()}`}</span><button disabled={offset()+50 >= total()} onClick={() => setOffset(offset()+50)}>Next</button></div></Show>
++              <Show when={kind() !== "saved" && !loading() && !entries().length}><p>No matching library entries.</p></Show>
++            </section>
++            <Show when={definition()}>
++              {(currentDefinition) => (
+                 <>
+-                  <div class="component-fields">
+-                    <For
+-                      each={
+-                        [
+-                          "name",
+-                          "partName",
+-                          "value",
+-                          "referencePrefix",
+-                        ] as const
+-                      }
+-                    >
+-                      {(key) => (
+-                        <label>
+-                          {key}
+-                          <input
+-                            aria-label={`Component ${key}`}
+-                            value={d[key]}
+-                            onChange={(e) =>
+-                              patch({ [key]: e.currentTarget.value })
+-                            }
+-                          />
+-                        </label>
+-                      )}
+-                    </For>
+-                  </div>
+                   <div class="component-previews">
+                     <div>
+-                      <h3>{d.footprint.name}</h3>
++                      <h3>{currentDefinition().footprint.name}</h3>
+                       <Preview />
+                     </div>
+                     <div>
+-                      <h3>{d.symbol?.name ?? "Generic symbol"}</h3>
++                      <h3>{definition()!.symbol?.name ?? "Generic symbol"}</h3>
+                       <Preview symbol />
+                       <button onClick={() => patch({ symbol: undefined })}>
+                         Use generic symbol
+                       </button>
+-                    </div>
+-                  </div>
+                   <label>
+                     Preview unit
+                     <select
+@@ -491,7 +333,7 @@
+                       <For
+                         each={[
+                           ...new Set(
+-                            d.symbol?.units
++                            definition()!.symbol?.units
+                               .map((u) => u.unit)
+                               .filter((n) => n > 0) ?? [1],
+                           ),
+@@ -512,7 +354,10 @@
+                       <option value="2">Alternate</option>
+                     </select>
+                   </label>
+-                  <table>
++                    </div>
++                  </div>
++                  <h3>Pin assignments</h3>
++                  <div class="component-pin-table"><table>
+                     <thead>
+                       <tr>
+                         <th>Pad</th>
+@@ -520,7 +365,7 @@
+                       </tr>
+                     </thead>
+                     <tbody>
+-                      <For each={terminalNumbers(d)}>
++                      <For each={terminalNumbers(definition()!)}>
+                         {(number) => (
+                           <tr
+                             classList={{ selected: selectedPad() === number }}
+@@ -530,11 +375,11 @@
+                             <td>
+                               <select
+                                 aria-label={`Map pad ${number}`}
+-                                value={d.pinMap[number] ?? ""}
++                                value={definition()!.pinMap[number] ?? ""}
+                                 onChange={(e) =>
+                                   patch({
+                                     pinMap: {
+-                                      ...d.pinMap,
++                                      ...definition()!.pinMap,
+                                       [number]: e.currentTarget.value,
+                                     },
+                                   })
+@@ -544,7 +389,7 @@
+                                 <For
+                                   each={[
+                                     ...new Map(
+-                                      d.symbol?.units
++                                      definition()!.symbol?.units
+                                         .flatMap((u) => u.pins)
+                                         .map((p) => [p.number, p]) ?? [],
+                                     ).values(),
+@@ -556,7 +401,7 @@
+                                     </option>
+                                   )}
+                                 </For>
+-                                <Show when={!d.symbol}>
++                                <Show when={!definition()!.symbol}>
+                                   <option value={number}>{number}</option>
+                                 </Show>
+                               </select>
+@@ -565,7 +410,7 @@
+                         )}
+                       </For>
+                     </tbody>
+-                  </table>
++                  </table></div>
+                 </>
+               )}
+             </Show>
+@@ -575,6 +420,7 @@
+           <p role="alert">{error()}</p>
+         </Show>
+         <footer class="dialog-actions">
++          <button class="component-configuration-button" onClick={() => setConfiguration(v => !v)}>{configuration() ? "Back to component" : "Configuration"}</button>
+           <button onClick={props.onClose}><ActionIcon name="Close" />Close</button>
+           <button disabled={!definition()} onClick={() => void save()}>
+             Save to library
+@@ -590,7 +436,8 @@
+               Apply replacement
+             </button>
+           </Show>
+-          <button disabled={!definition()} onClick={() => void save(true)}>
++          <Show when={props.placementUnavailableReason}><span class="placement-reason">{props.placementUnavailableReason}</span></Show>
++          <button disabled={!definition() || !!props.placementUnavailableReason || busy() || configuration()} onClick={() => void save(true)}>
+             Place
+           </button>
+         </footer>
+--- a/src/workbench/electrical/LibrarySettings.tsx
++++ b/src/workbench/electrical/LibrarySettings.tsx
+@@ -4,7 +4,8 @@
+ import { pickDirectory } from "../../bridge/dialog";
+ import { ActionIcon } from "../ActionIcon";
+ 
+-export function LibrarySettings() {
++export function LibrarySettings(props: { onChanged?: () => void } = {}) {
++  const [replacing, setReplacing] = createSignal<LibrarySource>();
+   const [sources, setSources] = createSignal<LibrarySource[]>([]);
+   const [path, setPath] = createSignal("");
+   const [variables, setVariables] = createSignal("");
+@@ -15,11 +16,12 @@
+   let alive = true;
+   onCleanup(() => { alive = false; });
+   async function run(action: () => Promise<void>) {
++    if (busy()) return;
+     setError(""); setBusy(true);
+     try { await action(); } catch (e) { if (alive) setError(e instanceof Error ? e.message : String(e)); }
+     finally { if (alive) setBusy(false); }
+   }
+-  async function refresh() { const result = await kicad.sources(); if (alive) setSources(result); }
++  async function refresh() { const result = await kicad.sources(); if (alive) setSources([...result].sort((a,b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path))); }
+   onMount(() => { if (isTauri()) void run(refresh); });
+   async function scan(id: string) {
+     let state = await kicad.rescan(id);
+@@ -31,7 +33,8 @@
+         await new Promise(resolve => setTimeout(resolve, 200));
+         if (alive) state = await kicad.job(state.id);
+       }
+-      if (alive) { setStatus(state.error ?? state.status); await refresh(); }
++      if (alive) { setStatus(state.error ?? state.status); await refresh(); props.onChanged?.(); }
++      return state.status === "done";
+     } finally { if (alive) setJob(""); }
+   }
+   return <><h3>KiCad libraries</h3><p>Register an installation, library directory, .pretty folder, .kicad_mod, .kicad_sym or library table. Project snapshots stay unchanged when sources are rescanned.</p>
+@@ -56,9 +59,19 @@
+     <button disabled={!isTauri() || busy() || !path().trim()} onClick={() => void run(async () => {
+       const parsed: unknown = variables().trim() ? JSON.parse(variables()) : {};
+       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Object.values(parsed).every(v => typeof v === "string")) throw new Error("Path variables must be an object of string values.");
+-      const source = await kicad.addSource(path().trim(), parsed as Record<string, string>); await refresh(); await scan(source.id);
+-    })}>Add and index source</button>
+-    <For each={sources()}>{source => <div><strong>{source.name}</strong><p>{source.path}</p><button disabled={busy()} onClick={() => void run(() => scan(source.id))}>Rescan</button><button disabled={busy()} onClick={() => void run(async () => { await kicad.removeSource(source.id); await refresh(); })}>Remove source</button><For each={source.diagnostics}>{d => <p>{d}</p>}</For></div>}</For>
+-    <p role="status">{status()}</p><Show when={job()}><button onClick={() => void run(async () => { await kicad.cancel(job()); })}>Cancel indexing</button></Show><Show when={error()}><p role="alert">{error()}</p></Show>
++      const original = replacing();
++      if (original && sources().some(s => s.id !== original.id && s.path.replaceAll("\\", "/").toLowerCase() === path().trim().replaceAll("\\", "/").toLowerCase())) throw new Error("This path is already registered as another source.");
++      const source = await kicad.addSource(path().trim(), parsed as Record<string, string>);
++      const done = await scan(source.id);
++      if (done && alive) {
++        if (original && source.id !== original.id) await kicad.removeSource(original.id);
++        setReplacing(undefined); setPath(""); await refresh(); props.onChanged?.();
++      }
++    })}>{replacing() ? "Save and index replacement" : "Add and index source"}</button>
++    <Show when={replacing()}><button disabled={busy()} onClick={() => { setReplacing(undefined); setPath(""); }}>Cancel path change</button></Show>
++    <div class="library-source-table"><table><thead><tr><th>Source</th><th>Configured path</th><th>Actions</th></tr></thead><tbody>
++    <For each={sources()}>{source => <tr><td><strong>{source.name}</strong><For each={source.diagnostics}>{d => <p>{d}</p>}</For></td><td class="library-source-path">{source.path}</td><td><div class="library-source-actions"><button disabled={busy()} onClick={() => { setReplacing(source); setPath(source.path); setVariables(JSON.stringify(source.variables ?? {})); }}>Change path</button><button disabled={busy()} onClick={() => void run(() => scan(source.id).then(() => {}))}>Rescan</button><button disabled={busy()} onClick={() => void run(async () => { await kicad.removeSource(source.id); await refresh(); props.onChanged?.(); })}>Remove source</button></div></td></tr>}</For>
++    </tbody></table></div>
++    <p role="status">{status()}</p><button disabled={!job()} onClick={() => { void kicad.cancel(job()).catch(e => { if (alive) setError(String(e)); }); }}>Cancel indexing</button><Show when={error()}><p role="alert">{error()}</p></Show>
+   </>;
+ }
+--- a/src/workbench/visual/visual.css
++++ b/src/workbench/visual/visual.css
+@@ -553,3 +553,35 @@
+ }
+ .palette.component-manager, .component-manager{width:min(1013px,95vw);height:min(760px,88vh);min-height:min(420px,66vh);max-height:92vh;display:flex;flex-direction:column}.component-manager-body{display:grid;grid-template-columns:240px 1fr;flex:1;overflow:auto;min-height:0}.component-manager-body aside,.component-manager-body main{padding:12px;overflow:auto}.component-manager-body aside{border-right:1px solid var(--border)}.component-previews{display:flex;flex-wrap:wrap}.component-previews canvas{width:100%;max-width:400px;background:#202020}.component-fields{display:flex;gap:8px;flex-wrap:wrap}.component-fields label,.component-inspector label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.library-results{display:flex;flex-wrap:wrap;gap:4px;max-height:280px;overflow:auto}.component-manager table,.component-inspector table{width:100%;text-align:left}.component-manager input,.component-manager select{max-width:100%}.component-inspector{padding:12px;overflow:auto}
+ .palette.component-manager, .component-manager{resize:both;min-width:min(680px,95vw);min-height:400px}.component-manager tr.selected{background:color-mix(in srgb,#ffcd11 20%,transparent)}
++
++/* Component library workspace */
++.palette.component-manager{width:min(1760px,calc(100vw - 48px));height:min(1000px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);min-height:0;min-width:0;overflow:hidden;resize:both}
++.component-manager .dialog-header,.component-manager .dialog-actions{flex-shrink:0}
++.component-manager-body{display:block;overflow:auto;min-height:0}
++.component-manager-body main,.component-configuration{padding:16px;min-width:0}
++.component-manager [hidden]{display:none!important}
++.component-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
++.component-browser{border-block:1px solid var(--border);padding-block:12px;margin-block:8px 16px}
++.component-browser-controls,.component-pagination,.library-source-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
++.component-browser-controls label{display:flex;align-items:center;gap:8px}.component-browser-controls label:nth-child(2){flex:1}.component-browser-controls input{width:100%}
++.component-manager .library-results{display:block;max-height:200px;overflow:auto;margin-top:8px}
++.component-manager table,.library-source-table table{width:100%;border-collapse:collapse;text-align:left}
++.component-manager th,.component-manager td,.library-source-table th,.library-source-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
++.component-manager th,.library-source-table th{position:sticky;top:0;background:var(--bg);z-index:1}
++.component-manager tbody tr:nth-child(even),.library-source-table tbody tr:nth-child(even){background:var(--surface)}
++.component-manager tr.selected{background:color-mix(in srgb,var(--accent,#ffcd11) 18%,transparent)}
++.component-pagination{justify-content:flex-end;margin-top:8px}
++.component-manager .component-previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
++.component-previews>div{min-width:0;border:1px solid var(--border);padding:10px}
++.component-manager .component-previews canvas{display:block;width:100%;max-width:none;aspect-ratio:400/220;background:var(--bg)}
++.component-previews h3{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.component-pin-table{max-height:240px;overflow:auto;border:1px solid var(--border)}
++.component-manager .component-configuration-button{margin-right:auto}
++.component-manager .dialog-actions{flex-wrap:wrap;gap:8px}
++.placement-reason{max-width:340px;font-size:12px}
++.library-source-table{overflow:auto;margin-block:16px}.library-source-path{overflow-wrap:anywhere;max-width:600px}
++@media(max-width:800px){.component-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.component-manager .dialog-actions{padding:8px}}
++
++.component-manager input,.component-manager select{border:1px solid var(--border);background:var(--bg);color:var(--text)}
++.component-manager input:focus-visible,.component-manager select:focus-visible{border-color:var(--focus);outline:2px solid var(--focus);outline-offset:1px}
++.component-browser-controls [role="tablist"]{display:flex;gap:4px}.component-browser-controls [aria-selected="true"]{border-color:var(--focus)}
+--- a/src/bridge/kicad.ts
++++ b/src/bridge/kicad.ts
+@@ -8,7 +8,7 @@
+ export interface KSymbolUnit { unit: number; bodyStyle: number; pins: KPin[]; graphics: KGraphic[] }
+ export interface KSymbol { id: string; name: string; source: string; raw: string; reference: string; units: KSymbolUnit[]; diagnostics: string[] }
+ export interface ComponentDefinition { id: string; name: string; partName: string; value: string; referencePrefix: string; footprint: KFootprint; symbol?: KSymbol; pinMap: Record<string,string> }
+-export interface LibrarySource { id: string; path: string; name: string; diagnostics: string[] }
++export interface LibrarySource { variables?: Record<string,string>; id: string; path: string; name: string; diagnostics: string[] }
+ export interface LibraryEntry { id: string; name: string; sourceId: string; kind: "footprint"|"symbol" }
+ export interface LibraryPage { entries: LibraryEntry[]; total: number }
+ export interface LibraryJob { id: string; status: "running"|"done"|"cancelled"|"failed"; scanned: number; total: number; error?: string }
+--- /dev/null
++++ b/src/workbench/electrical/ComponentManager.test.tsx
+@@ -0,0 +1,21 @@
++import { afterEach, expect, it, vi } from "vitest";
++import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
++import { ComponentManager } from "./ComponentManager";
++import { kicad, type ComponentDefinition } from "../../bridge/kicad";
++vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false }));
++const definition: ComponentDefinition = { id:"d", name:"Connector", partName:"P", value:"V", referencePrefix:"J", pinMap:{"1":"1"}, footprint:{id:"fp",name:"Connector footprint",source:"",raw:"",graphics:[],diagnostics:[],pads:[]} };
++afterEach(() => vi.restoreAllMocks());
++function setup(reason?: string) {
++ vi.spyOn(kicad,"sources").mockResolvedValue([]); vi.spyOn(kicad,"definitions").mockResolvedValue([definition]); vi.spyOn(kicad,"search").mockResolvedValue({entries:[],total:0}); vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(null);
++ const place=vi.fn(); render(() => <ComponentManager initial={definition} onClose={() => {}} onPlace={place} placementUnavailableReason={reason} />); return place;
++}
++it("retains draft and search across configuration and shows previews together", async () => {
++ setup(); fireEvent.input(screen.getByLabelText("Component name"),{target:{value:"Edited"}}); fireEvent.input(screen.getByLabelText("Search library"),{target:{value:"connector"}});
++ fireEvent.click(screen.getByRole("button",{name:"Configuration"})); expect(screen.getByRole("heading",{name:"KiCad libraries"})).toBeTruthy();
++ fireEvent.click(screen.getByRole("button",{name:"Back to component"}));
++ expect((screen.getByLabelText("Component name") as HTMLInputElement).value).toBe("Edited"); expect((screen.getByLabelText("Search library") as HTMLInputElement).value).toBe("connector");
++ expect(screen.getByLabelText("Footprint preview").parentElement?.parentElement).toBe(screen.getByLabelText("Symbol preview").parentElement?.parentElement);
++ await waitFor(() => expect(kicad.search).toHaveBeenCalled());
++});
++it("blocks Place with a visible calibration reason", () => { const place=setup("Calibrate the PCB before placement."); const button=screen.getByRole("button",{name:"Place"}) as HTMLButtonElement; expect(button.disabled).toBe(true); fireEvent.click(button); expect(place).not.toHaveBeenCalled(); expect(screen.getByText("Calibrate the PCB before placement.")).toBeTruthy(); });
++it("loads saved components through a table and hands a saved definition to placement", async () => { const place=setup(); vi.spyOn(kicad,"saveDefinition").mockResolvedValue(); fireEvent.click(screen.getByRole("tab",{name:"Saved components"})); await waitFor(() => expect(screen.getByRole("button",{name:"Load"})).toBeTruthy()); fireEvent.click(screen.getByRole("button",{name:"Place"})); await waitFor(() => expect(place).toHaveBeenCalledWith(definition)); });
+--- /dev/null
++++ b/src/workbench/electrical/LibrarySources.test.tsx
+@@ -0,0 +1,10 @@
++import { afterEach, expect, it, vi } from "vitest";
++import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
++import { LibrarySettings } from "./LibrarySettings";
++import { kicad } from "../../bridge/kicad";
++vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
++afterEach(() => vi.restoreAllMocks());
++const original={id:"old",name:"Original",path:"C:/old",diagnostics:[],variables:{KIPRJMOD:"C:/project"}};
++async function setup(status:"done"|"failed") { vi.spyOn(kicad,"sources").mockResolvedValue([original]); vi.spyOn(kicad,"addSource").mockResolvedValue({id:"new",name:"New",path:"C:/new",diagnostics:[]}); vi.spyOn(kicad,"rescan").mockResolvedValue({id:"job",status,scanned:1,total:1,error:status==="failed"?"Cannot index":undefined}); vi.spyOn(kicad,"removeSource").mockResolvedValue(); render(() => <LibrarySettings />); await waitFor(() => expect((screen.getByRole("button",{name:"Change path"}) as HTMLButtonElement).disabled).toBe(false)); fireEvent.click(screen.getByRole("button",{name:"Change path"})); fireEvent.input(screen.getByLabelText("Source path"),{target:{value:"C:/new"}}); fireEvent.click(screen.getByRole("button",{name:"Save and index replacement"})); }
++it("indexes a replacement before removing the old source and preserves variables",async()=>{await setup("done");await waitFor(()=>expect(kicad.removeSource).toHaveBeenCalledWith("old"));expect(kicad.addSource).toHaveBeenCalledWith("C:/new",original.variables);expect(vi.mocked(kicad.rescan).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(kicad.removeSource).mock.invocationCallOrder[0]);});
++it("retains the old source when replacement indexing fails",async()=>{await setup("failed");await waitFor(()=>expect(screen.getByRole("status").textContent).toBe("Cannot index"));expect(kicad.removeSource).not.toHaveBeenCalled();expect(screen.getByText("C:/old")).toBeTruthy();});

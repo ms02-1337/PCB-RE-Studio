@@ -55,6 +55,9 @@
 .ve-heading { display:flex; align-items:center; justify-content:space-between; height:34px; flex-shrink:0; padding:3px 6px; border-bottom:1px solid var(--border); }
 .ve-heading h2 { font-size:11px; font-weight:600; margin:0; }
 .ve-heading button { padding:2px 5px; }
+.ve-heading button .action-icon { margin:0; }
+/* Sidebar collapse toggles: flex-center the chevron icon. */
+.ve-heading-toggle { display:inline-flex; align-items:center; justify-content:center; }
 .ve-resizer { flex:0 0 5px; cursor:col-resize; background:var(--border); }
 .ve-resizer:focus-visible { background:var(--accent); }
 .ve-layer-count { display:flex; gap:8px; align-items:center; padding:8px; }
@@ -275,6 +278,105 @@
 .ve-net-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ve-net-check { font-size: 11px; color: var(--accent, #ffcd11); font-weight: bold; }
 .ve-net-empty { padding: 10px 8px; color: var(--muted); font-size: 11px; text-align: center; font-style: italic; }
+/* Nets browser docked at the bottom of the Images sidebar. */
+.ve-nets-toggle {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ve-nets-toggle:hover:not(:disabled) { background: var(--raised); }
+.ve-nets-toggle:focus-visible { outline: 2px solid var(--focus, #ffcd11); outline-offset: -2px; }
+.ve-nets-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.ve-nets-resizer { flex: 0 0 6px; cursor: ns-resize; background: transparent; }
+.ve-nets-resizer:hover { background: var(--raised); }
+.ve-nets-resizer:focus-visible { outline: 2px solid var(--focus, #ffcd11); outline-offset: -2px; }
+.ve-nets-section-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.ve-nets-section-bar h3 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+.ve-nets-collapse {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.ve-nets-collapse .action-icon { margin: 0; }
+.ve-nets-section-search { flex: 0 0 auto; margin: 6px 8px; }
+.ve-nets-section-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ve-nets-section-table table { width: 100%; border-collapse: collapse; }
+.ve-nets-section-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ve-nets-section-table td { padding: 4px 8px; border-top: 1px solid var(--border); font-size: 12px; }
+.ve-nets-section-table tr:first-child td { border-top: 0; }
+.ve-nets-section-table .col-color { width: 28px; text-align: center; }
+.ve-nets-section-table .col-count { width: 1%; white-space: nowrap; text-align: center; color: var(--muted); }
+.ve-nets-section-table .ve-nets-swatch { width: 12px; height: 12px; border-radius: 2px; }
+.ve-nets-section-table .ve-net-title-btn {
+  display: block;
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ve-nets-section-table .ve-net-title-btn:hover { background: var(--raised); }
+.ve-nets-section-table .ve-net-title-btn:focus-visible { outline: 2px solid var(--focus, #ffcd11); outline-offset: -1px; }
+.ve-nets-empty-line { padding: 8px; color: var(--muted); font-size: 12px; }
 /* Nets panel layout */
 .ve-nets {
   height: 100%;
@@ -557,6 +659,12 @@
   text-align: right;
 }
 .ve-element-badge {
+  /* Inline-block + middle alignment keeps the badge optically level with
+     the element-name link beside it (shared text baselines alone make the
+     padded badge hang below the name). */
+  display: inline-block;
+  line-height: 1.2;
+  vertical-align: middle;
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 3px;
@@ -575,6 +683,7 @@
   cursor: pointer;
   text-align: left;
   white-space: nowrap;
+  vertical-align: middle;
 }
 .ve-element-goto-link:hover {
   color: var(--accent);
@@ -1324,6 +1433,11 @@
 }
 
 .component-inspector .ve-net-selector { margin: 8px 0; }
+/* Inside the pad/pin table the Net column header replaces the selector
+   heading, and the row owns the outer spacing. */
+.component-inspector td .ve-net-selector { margin: 0; }
+.component-inspector td .ve-net-input-bar input { height: 26px; min-height: 26px; }
+.component-inspector td .ve-net-add-btn { height: 26px; width: 26px; flex-basis: 26px; }
 .component-inspector-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1349,3 +1463,21 @@
   gap: 6px;
   min-height: 28px;
 }
+
+.component-manager .component-browser .col-pin-count { width: 1%; white-space: nowrap; text-align: center; }
+
+/* Replacement is a single review workspace, independent of the create wizard. */
+.component-manager .component-manager-body > main.component-replacement-mode { overflow: auto; display: block; }
+.component-replacement-mode > h3 { margin: 0 0 10px; }
+.component-replacement-tables { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 12px 0; }
+.component-replacement-browser { min-width: 0; border: 1px solid var(--border); padding: 10px; }
+.component-replacement-browser .component-browser-controls { flex-wrap: wrap; }
+.component-replacement-browser .component-browser-controls label { flex: 1; min-width: 100px; }
+.component-replacement-browser input { width: 100%; height: 30px; padding: 4px 8px; margin: 0; box-sizing: border-box; }
+.component-manager .component-replacement-browser .library-results { height: clamp(130px,20dvh,220px); max-height: 220px; overflow: auto; }
+.component-replacement-browser .col-source,.component-replacement-browser .col-actions { text-align: center; }
+.component-replacement-browser .col-actions { width: 1%; white-space: nowrap; }
+.component-replacement-mode .component-workspace { min-height: 0; flex: none; display: block; }
+.component-replacement-mode .component-preview-stage { display: block; }
+.component-replacement-mode .component-previews { height: clamp(200px,25dvh,300px); }
+.component-replacement-mode .component-review-pins .component-pin-table { max-height: 240px; overflow: auto; }

@@ -90,10 +90,13 @@ it("places independent terminals and updates only physically connected group", (
   editor.key("Escape");
   editor.down({ x: 0, y: 0 });
   fireEvent.change(screen.getByLabelText("Net for U1 pad 1"), {
-    target: { value: "new" },
+    target: { value: "POWER" },
   });
   const c = store.visual.activePcb()!.components![0];
   expect(c.terminals[0].netId).toBeTruthy();
+  expect(
+    store.visual.activePcb()!.nets!.find((n) => n.name === "POWER"),
+  ).toBeDefined();
   expect(c.terminals[1].netId).toBeUndefined();
   expect(store.visual.activePcb()!.schematic!.units).toHaveLength(1);
 });
@@ -238,6 +241,73 @@ it("reconciles schematic connected pins when assigning a terminal to another net
     store.visual.activePcb()!.components!.map((c) => c.terminals[0].netId),
   ).toEqual(["b", "b"]);
   expect(store.visual.activePcb()!.schematic!.wires[0].netId).toBe("b");
+});
+it("assigns pad nets with a filterable input and dropdown like vias", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+  const p = structuredClone(store.visual.activePcb()!);
+  p.nets = [
+    { id: "a", name: "GND", color: "#ff0000" },
+    { id: "b", name: "VCC", color: "#00ff00" },
+  ];
+  store.visual.replacePcb(p);
+  editor.down({ x: 0, y: 0 });
+
+  const input = screen.getByRole("combobox", {
+    name: "Net for U1 pad 1",
+  }) as HTMLInputElement;
+  fireEvent.click(input);
+  const list = screen.getByRole("listbox", { name: "Nets list" });
+  expect(list.textContent).toContain("Unassigned");
+  expect(list.textContent).toContain("GND");
+  expect(list.textContent).toContain("VCC");
+
+  // Typing filters the nets listed below the input
+  fireEvent.input(input, { target: { value: "VC" } });
+  expect(list.textContent).toContain("VCC");
+  expect(list.textContent).not.toContain("GND");
+
+  // Clicking a filtered net assigns it to the pad
+  fireEvent.click(screen.getByRole("button", { name: "VCC" }));
+  expect(store.visual.activePcb()!.components![0].terminals[0].netId).toBe("b");
+  expect(screen.queryByRole("listbox")).toBeNull();
+
+  // Enter with an unknown name creates and assigns a new net
+  const create = screen.getByRole("combobox", { name: "Net for U1 pad 1" });
+  fireEvent.input(create, { target: { value: "CAN_H" } });
+  fireEvent.keyDown(create, { key: "Enter" });
+  const next = store.visual.activePcb()!;
+  const created = next.nets!.find((n) => n.name === "CAN_H");
+  expect(created).toBeDefined();
+  expect(next.components![0].terminals[0].netId).toBe(created!.id);
+});
+it("confirms before clearing NC on a pad net assignment and keeps NC when declined", () => {
+  editor.arm(definition);
+  editor.down({ x: 0, y: 0 });
+  editor.key("Escape");
+  editor.down({ x: 0, y: 0 });
+  const p = structuredClone(store.visual.activePcb()!);
+  p.nets = [{ id: "a", name: "GND", color: "#ff0000" }];
+  p.components![0].terminals[0].nc = true;
+  store.visual.replacePcb(p);
+  editor.down({ x: 0, y: 0 });
+
+  const input = screen.getByRole("combobox", { name: "Net for U1 pad 1" });
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  fireEvent.change(input, { target: { value: "a" } });
+  const kept = store.visual.activePcb()!.components![0].terminals[0];
+  expect(kept.nc).toBe(true);
+  expect(kept.netId).toBeUndefined();
+
+  confirmSpy.mockReturnValue(true);
+  fireEvent.change(input, { target: { value: "a" } });
+  const cleared = store.visual.activePcb()!.components![0].terminals[0];
+  expect(cleared.nc).toBe(false);
+  expect(cleared.netId).toBe("a");
+  expect(confirmSpy).toHaveBeenCalledWith("Clear NC and assign net?");
+  confirmSpy.mockRestore();
 });
 it("rotates an armed footprint with R and selects its empty body", () => {
   editor.arm(definition);

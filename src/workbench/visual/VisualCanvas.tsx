@@ -1,5 +1,5 @@
-import type { IssueReveal } from "../issues";
 import type { createComponentEditor } from "../electrical/ComponentEditor";
+import type { IssueReveal } from "../issues";
 import { Show, on, createSignal, createEffect, onCleanup, onMount } from "solid-js";
 import { assetRead } from "../../bridge/project";
 import { hitVisualImage, type VisualImage, type VisualPcb } from "./model";
@@ -46,6 +46,31 @@ export type VisualToolPrompt =
   | { kind: "calibrate"; spanPx: number }
   | { kind: "resizeAxis"; axis: "x" | "y"; spanPx: number };
 
+/** Camera math for "go to element": center a world box with a comfortable
+ * margin, clamped so tiny elements never zoom in unbounded. Pure so the
+ * fit-with-flips reasoning stays identical to fit(). */
+export function centerBoxOn(
+  box: { left: number; right: number; top: number; bottom: number },
+  width: number,
+  height: number,
+  maxScale = 8,
+): { scale: number; offsetX: number; offsetY: number } {
+  const w = Math.max(1e-6, box.right - box.left);
+  const h = Math.max(1e-6, box.bottom - box.top);
+  const scale = Math.max(
+    0.001,
+    Math.min(
+      maxScale,
+      Math.min(Math.max(1, width - 80) / w, Math.max(1, height - 80) / h),
+    ),
+  );
+  return {
+    scale,
+    offsetX: (width - w * scale) / 2 - box.left * scale,
+    offsetY: (height - h * scale) / 2 - box.top * scale,
+  };
+}
+
 export function VisualCanvas(props: {
   issueHighlight?: IssueReveal | null;
   copper?: CopperEditor;
@@ -62,6 +87,15 @@ export function VisualCanvas(props: {
   cancelGeneration?: number;
   flipX: boolean;
   flipY: boolean;
+  /** Camera request from the nets browser: center this world box in view.
+   * Each new token is applied once; null requests are ignored. */
+  focusBox?: () => {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    token: number;
+  } | null;
   /** Panel callback: the controller went idle after Esc/a commit, so the
    * toolbar button unpresses. */
   onToolEnd: () => void;
@@ -505,7 +539,8 @@ export function VisualCanvas(props: {
           dy: multiDrag.currentWorld.y - multiDrag.startWorld.y,
         }
       : undefined;
-    props.components?.draw(ctx, scale, multiOffset, selectedComponents);
+    const hlNet = props.copper?.highlightedNet?.() ?? "";
+    props.components?.draw(ctx, scale, multiOffset, selectedComponents, hlNet);
     props.copper?.draw(ctx, scale, multiOffset, selectedCopper);
     const issue = props.issueHighlight;
     const target = issue?.issue.target;
@@ -561,6 +596,18 @@ export function VisualCanvas(props: {
     offsetY = (height - (box.bottom - box.top) * scale) / 2 - box.top * scale;
     redraw();
   }
+  let handledFocusToken = 0;
+  createEffect(() => {
+    const request = props.focusBox?.();
+    if (!request || request.token === handledFocusToken) return;
+    handledFocusToken = request.token;
+    if (width <= 1 || height <= 1) return;
+    const next = centerBoxOn(request, width, height);
+    scale = next.scale;
+    offsetX = next.offsetX;
+    offsetY = next.offsetY;
+    redraw();
+  });
   let handledIssueToken = 0;
   function applyIssueFocus() {
     const request = props.issueHighlight;
@@ -1240,6 +1287,10 @@ export function VisualCanvas(props: {
           multiDrag = null;
           if (!controller.tool() || (drag && !drag.imageId)) end(false);
         }}
+        onPointerLeave={() => {
+          props.copper?.clearHover?.();
+          redraw();
+        }}
         onKeyDown={(e) => {
           if (!controller.tool() && props.components?.key(e.key)) {
             e.preventDefault();
@@ -1269,6 +1320,7 @@ export function VisualCanvas(props: {
               execute(controller.cancel());
               return;
             }
+            props.components?.cancel();
             end(false);
             boxSelect = null;
             multiDrag = null;

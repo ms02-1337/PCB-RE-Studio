@@ -17,6 +17,7 @@ import {
 } from "./domain";
 import { mergeNets, newNet, ncContacts } from "../visual/copper";
 import { layerLabel, type VisualPcb } from "../visual/model";
+import { NetSelector } from "../visual/NetSelector";
 import { ComponentManager } from "./ComponentManager";
 import { ActionIcon } from "../ActionIcon";
 export function createComponentEditor(
@@ -802,31 +803,43 @@ export function createComponentEditor(
                           {c.definition.pinMap[t.number] ?? "Unmapped"}
                         </td>
                         <td>
-                          <select
-                            aria-label={`Net for ${c.reference} pad ${t.number}`}
-                            value={t.netId ?? ""}
-                            onChange={(e) => {
-                              const value = e.currentTarget.value;
+                          <NetSelector
+                            compact
+                            nets={() => pcb()?.nets ?? []}
+                            value={() => t.netId ?? ""}
+                            ariaLabel={`Net for ${c.reference} pad ${t.number}`}
+                            onChange={(id) => {
                               if (t.nc && !confirm("Clear NC and assign net?"))
                                 return;
-                              update((v, next) => {
+                              update((v) => {
                                 const term = v.terminals.find(
                                   (x) => x.number === t.number,
                                 )!;
                                 term.nc = false;
-                                term.netId =
-                                  value === "new"
-                                    ? newNet(next).id
-                                    : value || undefined;
+                                term.netId = id || undefined;
                               });
                             }}
-                          >
-                            <option value="">Unassigned</option>
-                            <option value="new">Create net</option>
-                            <For each={pcb()?.nets}>
-                              {(n) => <option value={n.id}>{n.name}</option>}
-                            </For>
-                          </select>
+                            onAdd={(name) => {
+                              const trimmed = name.trim();
+                              if (!trimmed) return;
+                              if (t.nc && !confirm("Clear NC and assign net?"))
+                                return;
+                              update((v, next) => {
+                                next.nets ??= [];
+                                let net = next.nets.find(
+                                  (n) =>
+                                    n.name.toLowerCase() ===
+                                    trimmed.toLowerCase(),
+                                );
+                                if (!net) net = newNet(next, trimmed);
+                                const term = v.terminals.find(
+                                  (x) => x.number === t.number,
+                                )!;
+                                term.nc = false;
+                                term.netId = net.id;
+                              });
+                            }}
+                          />
                         </td>
                         <td>
                           <input

@@ -1,8 +1,9 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { ActionIcon } from "../ActionIcon";
 import type { PlacementStore } from "../placement/store";
-import { length, mergeNets, newNet } from "./copper";
-import { layerLabel, type CopperNet, type VisualPcb } from "./model";
+import { mergeNets, netElements, newNet, type NetElement } from "./copper";
+import type { CopperNet, VisualPcb } from "./model";
+import { NetElementsModal } from "./NetElementsModal";
 import "./visual.css";
 
 export function NetsPanel(props: {
@@ -23,12 +24,7 @@ export function NetsPanel(props: {
     props.store.visual.replaceCopper(next.id, next);
   };
 
-  const members = (id: string) =>
-    [
-      ...(pcb()?.traces ?? []),
-      ...(pcb()?.vias ?? []),
-      ...(pcb()?.zones ?? []),
-    ].filter((e) => e.netId === id);
+  const members = (id: string) => (pcb() ? netElements(pcb()!, id) : []);
 
   const filteredNets = () => {
     const q = search().trim().toLowerCase();
@@ -37,24 +33,6 @@ export function NetsPanel(props: {
     return all.filter((n) => n.name.toLowerCase().includes(q));
   };
 
-  const getLayerName = (layerId?: string) => {
-    const p = pcb();
-    if (!layerId || !p?.layers) return "-";
-    const idx = p.layers.indexOf(layerId);
-    if (idx < 0) return layerId;
-    return layerLabel(idx, p.layers.length);
-  };
-
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && modalNet()) {
-        setModalNet(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
-  });
-
   return (
     <div class="ve-nets">
       <Show
@@ -62,74 +40,62 @@ export function NetsPanel(props: {
         fallback={<p class="muted">Open a project to manage nets.</p>}
       >
         <div class="ve-nets-header">
-          <div class="ve-nets-title-row">
-            <div class="ve-nets-title-group">
-              <h1>PCB nets</h1>
-              <span class="ve-nets-count">
-                {pcb()?.nets?.length ?? 0} nets
-              </span>
-            </div>
-            <div class="ve-nets-pcb-control">
-              <label for="ve-nets-pcb-select">PCB</label>
-              <select
-                id="ve-nets-pcb-select"
-                class="ve-nets-pcb-select"
-                aria-label="Select PCB"
-                value={pcb()?.id}
-                onChange={(e) => {
-                  props.store.visual.activate(e.currentTarget.value);
-                  setModalNet(null);
-                }}
-              >
-                <For each={props.store.visual.editor()?.pcbs}>
-                  {(p) => <option value={p.id}>{p.name}</option>}
-                </For>
-              </select>
-            </div>
-          </div>
-
-          <div class="ve-nets-toolbar">
-            <div class="ve-nets-search">
-              <label for="ve-nets-search-input">Search nets</label>
-              <input
-                id="ve-nets-search-input"
-                type="search"
-                placeholder="Search nets by name…"
-                value={search()}
-                onInput={(e) => setSearch(e.currentTarget.value)}
-              />
-            </div>
-            <form
-              class="ve-nets-create-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const trimmed = name().trim();
-                if (
-                  trimmed &&
-                  !pcb()?.nets?.some(
-                    (n) => n.name.toLowerCase() === trimmed.toLowerCase(),
-                  )
-                ) {
-                  edit((p) => {
-                    newNet(p, trimmed);
-                  });
-                  setName("");
-                }
+          <h1>PCB nets</h1>
+          <span class="ve-nets-title-separator" aria-hidden="true" />
+          <span class="ve-nets-count">
+            {pcb()?.nets?.length ?? 0} nets
+          </span>
+          <label>
+            PCB{" "}
+            <select
+              aria-label="Select PCB"
+              value={pcb()?.id}
+              onChange={(e) => {
+                props.store.visual.activate(e.currentTarget.value);
+                setModalNet(null);
               }}
             >
-              <label for="ve-nets-new-input">New net name</label>
-              <input
-                id="ve-nets-new-input"
-                placeholder="New net name…"
-                value={name()}
-                onInput={(e) => setName(e.currentTarget.value)}
-              />
-              <button type="submit" disabled={!name().trim()}>
-                <ActionIcon name="Create" />
-                Create net
-              </button>
-            </form>
-          </div>
+              <For each={props.store.visual.editor()?.pcbs}>
+                {(p) => <option value={p.id}>{p.name}</option>}
+              </For>
+            </select>
+          </label>
+          <input
+            type="search"
+            aria-label="Search nets"
+            placeholder="Search nets by name…"
+            value={search()}
+            onInput={(e) => setSearch(e.currentTarget.value)}
+          />
+          <form
+            class="ve-nets-create-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const trimmed = name().trim();
+              if (
+                trimmed &&
+                !pcb()?.nets?.some(
+                  (n) => n.name.toLowerCase() === trimmed.toLowerCase(),
+                )
+              ) {
+                edit((p) => {
+                  newNet(p, trimmed);
+                });
+                setName("");
+              }
+            }}
+          >
+            <input
+              aria-label="New net name"
+              placeholder="New net name…"
+              value={name()}
+              onInput={(e) => setName(e.currentTarget.value)}
+            />
+            <button type="submit" disabled={!name().trim()}>
+              <ActionIcon name="Create" />
+              Create net
+            </button>
+          </form>
         </div>
 
         <div class="ve-nets-table-wrapper">
@@ -160,20 +126,16 @@ export function NetsPanel(props: {
                 }
               >
                 {(net) => {
+                  const elements = () => members(net.id);
                   const padsCount = () =>
-                    (pcb()?.components ?? [])
-                      .flatMap((c) => c.terminals)
-                      .filter((t) => t.netId === net.id).length;
+                    elements().filter((e) => e.kind === "pad").length;
                   const viasCount = () =>
-                    members(net.id).filter((e) => !("points" in e)).length;
+                    elements().filter((e) => e.kind === "via").length;
                   const tracesCount = () =>
-                    members(net.id).filter((e) => "width" in e).length;
+                    elements().filter((e) => e.kind === "trace").length;
                   const zonesCount = () =>
-                    members(net.id).filter(
-                      (e) => "points" in e && !("width" in e),
-                    ).length;
-                  const totalElements = () =>
-                    padsCount() + viasCount() + tracesCount() + zonesCount();
+                    elements().filter((e) => e.kind === "zone").length;
+                  const totalElements = () => elements().length;
 
                   return (
                     <tr>
@@ -329,301 +291,53 @@ export function NetsPanel(props: {
           </table>
         </div>
 
-        <Show when={modalNet()}>
-          {(activeNet) => {
-            const netId = activeNet().id;
-
-            const elements = () => {
-              const p = pcb();
-              if (!p) return [];
-              const list: {
-                type: string;
-                name: string;
-                layer: string;
-                comment: string;
-                onSaveComment: (comment: string) => void;
-                onGoTo: () => void;
-              }[] = [];
-
-              // Pads / Component terminals
-              for (const c of p.components ?? []) {
-                for (const t of c.terminals ?? []) {
-                  if (t.netId === netId) {
-                    list.push({
-                      type: "Pad",
-                      name: `${c.reference} pin ${t.number}`,
-                      layer: getLayerName(c.layerId),
-                      comment: t.comment ?? "",
-                      onSaveComment: (val) => {
-                        edit((draft) => {
-                          const comp = draft.components?.find(
-                            (x) => x.id === c.id,
-                          );
-                          const term = comp?.terminals?.find(
-                            (x) => x.number === t.number,
-                          );
-                          if (term) term.comment = val.trim() || undefined;
-                        });
-                      },
-                      onGoTo: () => {
-                        sessionStorage.setItem(
-                          "electrical-navigation",
-                          JSON.stringify({ componentId: c.id }),
-                        );
-                        sessionStorage.setItem(
-                          "visual-net-navigation",
-                          JSON.stringify({
-                            pcbId: p.id,
-                            elementId: c.id,
-                            layerId: c.layerId,
-                            netId,
-                          }),
-                        );
-                        setModalNet(null);
-                        props.onNavigate();
-                      },
-                    });
+        <Show when={modalNet()} keyed>
+          {(activeNet) => (
+            <NetElementsModal
+              net={activeNet}
+              pcb={pcb}
+              elements={() => members(activeNet.id)}
+              onClose={() => setModalNet(null)}
+              onGoTo={(el) => {
+                if (el.kind === "pad")
+                  sessionStorage.setItem(
+                    "electrical-navigation",
+                    JSON.stringify({ componentId: el.id }),
+                  );
+                sessionStorage.setItem(
+                  "visual-net-navigation",
+                  JSON.stringify({
+                    pcbId: pcb()!.id,
+                    elementId: el.id,
+                    ...(el.layerId ? { layerId: el.layerId } : {}),
+                    netId: activeNet.id,
+                  }),
+                );
+                setModalNet(null);
+                props.onNavigate();
+              }}
+              onEditComment={(el: NetElement, comment: string) => {
+                edit((draft) => {
+                  const value = comment.trim() || undefined;
+                  if (el.kind === "pad") {
+                    const term = draft.components
+                      ?.find((x) => x.id === el.id)
+                      ?.terminals?.find((x) => x.number === el.terminal);
+                    if (term) term.comment = value;
+                  } else if (el.kind === "trace") {
+                    const t = draft.traces?.find((x) => x.id === el.id);
+                    if (t) t.comment = value;
+                  } else if (el.kind === "via") {
+                    const v = draft.vias?.find((x) => x.id === el.id);
+                    if (v) v.comment = value;
+                  } else {
+                    const z = draft.zones?.find((x) => x.id === el.id);
+                    if (z) z.comment = value;
                   }
-                }
-              }
-
-              // Traces
-              for (const t of p.traces ?? []) {
-                if (t.netId === netId) {
-                  const lengthMm = (
-                    p.pxPerMm ? length(t.points) / p.pxPerMm : 0
-                  ).toFixed(2);
-                  const widthMm = (
-                    p.pxPerMm ? t.width / p.pxPerMm : 0
-                  ).toFixed(2);
-                  list.push({
-                    type: "Trace",
-                    name: `Trace ${t.id} (${widthMm}mm, ${lengthMm}mm)`,
-                    layer: getLayerName(t.layerId),
-                    comment: t.comment ?? "",
-                    onSaveComment: (val) => {
-                      edit((draft) => {
-                        const tr = draft.traces?.find((x) => x.id === t.id);
-                        if (tr) tr.comment = val.trim() || undefined;
-                      });
-                    },
-                    onGoTo: () => {
-                      sessionStorage.setItem(
-                        "visual-net-navigation",
-                        JSON.stringify({
-                          pcbId: p.id,
-                          elementId: t.id,
-                          layerId: t.layerId,
-                          netId,
-                        }),
-                      );
-                      setModalNet(null);
-                      props.onNavigate();
-                    },
-                  });
-                }
-              }
-
-              // Vias
-              for (const v of p.vias ?? []) {
-                if (v.netId === netId) {
-                  // Diameter is stored in world px like every inspector
-                  // neighbor; convert through the PCB calibration.
-                  const pxPerMm = p.pxPerMm ?? 1;
-                  list.push({
-                    type: "Via",
-                    name: `Via ${v.id}${v.diameter != null ? ` (Ø ${(v.diameter / pxPerMm).toFixed(2)}mm)` : ""}`,
-                    layer: "All layers",
-                    comment: v.comment ?? "",
-                    onSaveComment: (val) => {
-                      edit((draft) => {
-                        const via = draft.vias?.find((x) => x.id === v.id);
-                        if (via) via.comment = val.trim() || undefined;
-                      });
-                    },
-                    onGoTo: () => {
-                      sessionStorage.setItem(
-                        "visual-net-navigation",
-                        JSON.stringify({
-                          pcbId: p.id,
-                          elementId: v.id,
-                          netId,
-                        }),
-                      );
-                      setModalNet(null);
-                      props.onNavigate();
-                    },
-                  });
-                }
-              }
-
-              // Zones
-              for (const z of p.zones ?? []) {
-                if (z.netId === netId) {
-                  list.push({
-                    type: "Zone",
-                    name: `Zone ${z.id} (${z.points.length} vertices)`,
-                    layer: getLayerName(z.layerId),
-                    comment: z.comment ?? "",
-                    onSaveComment: (val) => {
-                      edit((draft) => {
-                        const zone = draft.zones?.find((x) => x.id === z.id);
-                        if (zone) zone.comment = val.trim() || undefined;
-                      });
-                    },
-                    onGoTo: () => {
-                      sessionStorage.setItem(
-                        "visual-net-navigation",
-                        JSON.stringify({
-                          pcbId: p.id,
-                          elementId: z.id,
-                          layerId: z.layerId,
-                          netId,
-                        }),
-                      );
-                      setModalNet(null);
-                      props.onNavigate();
-                    },
-                  });
-                }
-              }
-
-              return list;
-            };
-
-            return (
-              <div
-                class="overlay overlay--center"
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) setModalNet(null);
-                }}
-              >
-                <section
-                  class="palette type-manager ve-net-modal"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label={`Elements in net ${activeNet().name}`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setModalNet(null);
-                      return;
-                    }
-                    if (e.key !== "Tab") return;
-                    const items = Array.from(
-                      e.currentTarget.querySelectorAll<HTMLElement>(
-                        "input:not([disabled]),button:not([disabled]),select:not([disabled])",
-                      ),
-                    );
-                    const first = items[0];
-                    const last = items[items.length - 1];
-                    if (e.shiftKey && document.activeElement === first) {
-                      e.preventDefault();
-                      last?.focus();
-                    } else if (!e.shiftKey && document.activeElement === last) {
-                      e.preventDefault();
-                      first?.focus();
-                    }
-                  }}
-                >
-                  <header class="type-dialog-header">
-                    <div class="ve-net-modal-title">
-                      <span
-                        class="ve-net-dot"
-                        style={{ background: activeNet().color }}
-                        aria-hidden="true"
-                      />
-                      <h2>Elements in net {activeNet().name}</h2>
-                      <span class="ve-net-count-pill">
-                        {elements().length}
-                      </span>
-                    </div>
-                  </header>
-
-                  <div class="type-dialog-content">
-                    <Show
-                      when={elements().length > 0}
-                      fallback={
-                        <p class="muted">No elements assigned to this net.</p>
-                      }
-                    >
-                      <table
-                        class="type-table ve-net-elements-table"
-                        aria-label="Net elements table"
-                      >
-                        <thead>
-                          <tr>
-                            <th scope="col" class="col-el-type">Type</th>
-                            <th scope="col" class="col-el-name">Element name</th>
-                            <th scope="col" class="col-el-layer">Layer</th>
-                            <th scope="col" class="col-el-comment">Comment</th>
-                            <th scope="col" class="col-el-actions">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <For each={elements()}>
-                            {(el) => (
-                              <tr>
-                                <td class="col-el-type">
-                                  <span class="ve-element-badge">
-                                    {el.type}
-                                  </span>
-                                </td>
-                                <td class="col-el-name">
-                                  <button
-                                    type="button"
-                                    class="ve-element-goto-link"
-                                    title="Click to view and highlight in Visual Editor"
-                                    onClick={el.onGoTo}
-                                  >
-                                    {el.name}
-                                  </button>
-                                </td>
-                                <td class="col-el-layer muted">{el.layer}</td>
-                                <td class="col-el-comment">
-                                  <input
-                                    type="text"
-                                    class="ve-element-comment"
-                                    placeholder="Add comment…"
-                                    aria-label={`Comment for ${el.name}`}
-                                    value={el.comment}
-                                    onChange={(e) =>
-                                      el.onSaveComment(e.currentTarget.value)
-                                    }
-                                  />
-                                </td>
-                                <td class="col-el-actions">
-                                  <button
-                                    type="button"
-                                    class="ve-element-action-btn"
-                                    title="Inspect in Visual Editor"
-                                    onClick={el.onGoTo}
-                                  >
-                                    Show in editor →
-                                  </button>
-                                </td>
-                              </tr>
-                            )}
-                          </For>
-                        </tbody>
-                      </table>
-                    </Show>
-                  </div>
-
-                  <footer class="type-dialog-footer">
-                    <button
-                      type="button"
-                      class="type-close"
-                      onClick={() => setModalNet(null)}
-                    >
-                      <ActionIcon name="Close" />
-                      Close
-                    </button>
-                  </footer>
-                </section>
-              </div>
-            );
-          }}
+                });
+              }}
+            />
+          )}
         </Show>
       </Show>
     </div>

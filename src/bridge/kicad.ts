@@ -7,9 +7,9 @@ export interface KFootprint { id: string; name: string; source: string; raw: str
 export interface KPin { number: string; name: string; x: number; y: number; rotation: number; length: number; electricalType: string; hidden: boolean }
 export interface KSymbolUnit { unit: number; bodyStyle: number; pins: KPin[]; graphics: KGraphic[] }
 export interface KSymbol { id: string; name: string; source: string; raw: string; reference: string; units: KSymbolUnit[]; diagnostics: string[] }
-export interface ComponentDefinition { id: string; name: string; partName: string; value: string; referencePrefix: string; footprint: KFootprint; symbol?: KSymbol; pinMap: Record<string,string> }
+export interface ComponentDefinition { id: string; name: string; partName: string; value: string; referencePrefix: string; footprint: KFootprint; symbol?: KSymbol; pinMap: Record<string,string>; ncPins?: string[] }
 export interface LibrarySource { variables?: Record<string,string>; id: string; path: string; name: string; diagnostics: string[]; local?: boolean }
-export interface LibraryEntry { id: string; name: string; sourceId: string; kind: "footprint"|"symbol" }
+export interface LibraryEntry { pinCount?: number; id: string; name: string; sourceId: string; kind: "footprint"|"symbol" }
 export interface LibraryPage { entries: LibraryEntry[]; total: number }
 export interface LibraryJob { id: string; status: "running"|"done"|"cancelled"|"failed"; scanned: number; total: number; error?: string }
 export interface ImportOutcome { file: string; library: string; entries: LibraryEntry[]; error?: string }

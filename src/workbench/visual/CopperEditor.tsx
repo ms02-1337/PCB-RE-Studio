@@ -27,6 +27,7 @@ import {
   zoneCensus,
   ncContacts,
 } from "./copper";
+import { NetSelector } from "./NetSelector";
 import { loadCopperDefaults, type CopperDefaults } from "./defaults";
 
 type Element = CopperTrace | CopperZone | CopperVia;
@@ -45,6 +46,8 @@ export function createCopperEditor(
   const [mode, setMode] = createSignal<Mode>("select");
   const [selected, setSelected] = createSignal<string | null>(null);
   const [highlight, setHighlight] = createSignal("");
+  const [hoverNet, setHoverNet] = createSignal("");
+  const activeHighlight = () => hoverNet() || highlight();
   // Placement parameters start from the persisted user defaults; the
   // settings modal can push new defaults mid-session (in-progress drafts
   // already captured their width at start, so they are unaffected).
@@ -91,12 +94,26 @@ export function createCopperEditor(
     cursor = null;
     drag = null;
     origin = undefined;
+    setHoverNet("");
     changed();
   };
   const setActiveLayer = (id: string) => {
     cancel();
     setLayer(id);
     setSelected(null);
+    setHoverNet("");
+  };
+  /** Select an element, switch to its layer and light its whole net — the
+   * shared landing behavior for net-navigation requests from the Nets tab,
+   * the sidebar nets browser and stale sessionStorage handoffs. */
+  const locate = (elementId: string, netId: string, layerId?: string) => {
+    cancel();
+    setMode("select");
+    const p = pcb();
+    if (layerId && p?.layers.includes(layerId)) setLayer(layerId);
+    setSelected(elementId);
+    setHighlight(netId);
+    changed();
   };
   createEffect(() => {
     const p = pcb();
@@ -132,14 +149,7 @@ export function createCopperEditor(
             layerId?: string;
             netId: string;
           };
-          if (nav.pcbId === p?.id) {
-            setMode("select");
-            if (nav.layerId && p.layers.includes(nav.layerId))
-              setLayer(nav.layerId);
-            setSelected(nav.elementId);
-            setHighlight(nav.netId);
-            changed();
-          }
+          if (nav.pcbId === p?.id) locate(nav.elementId, nav.netId, nav.layerId);
         } catch {
           /* A stale navigation request is harmless. */
         }
@@ -376,6 +386,27 @@ export function createCopperEditor(
       )
     );
   }
+  function hitNet(p: Point, scale: number): string | undefined {
+    const e = hit(p, scale);
+    if (e?.netId) return e.netId;
+    for (const c of spatial()?.query({
+      left: p.x - 6 / scale,
+      right: p.x + 6 / scale,
+      top: p.y - 6 / scale,
+      bottom: p.y + 6 / scale,
+    }) ?? []) {
+      if ("padTerminal" in c) {
+        if (
+          c.layerId === layer() &&
+          (inside(p, c.points) || distance(p, c.padCenter) <= 6 / scale) &&
+          c.netId
+        ) {
+          return c.netId;
+        }
+      }
+    }
+    return undefined;
+  }
   function down(p: Point, scale: number, shift: boolean, button: number) {
     if (!enabled() || modal()) return false;
     if (button === 2 && points.length) {
@@ -383,6 +414,7 @@ export function createCopperEditor(
       return true;
     }
     if (button !== 0) return false;
+    setHoverNet("");
     if (mode() === "select") {
       setHighlight("");
       const e = hit(p, scale);
@@ -468,6 +500,14 @@ export function createCopperEditor(
       cursor = snappedDrag(p, scale, shift).point;
       changed();
       return;
+    }
+    if (mode() === "select") {
+      const net = hitNet(p, scale) ?? "";
+      if (net !== hoverNet()) {
+        setHoverNet(net);
+      }
+    } else if (hoverNet()) {
+      setHoverNet("");
     }
     cursor = snap(p, scale, shift).point;
     if (mode() === "zone") cursor = p;
@@ -580,6 +620,7 @@ export function createCopperEditor(
     if (!p) return;
     const color = (e: Element) =>
       p.nets?.find((n) => n.id === e.netId)?.color ?? "#a0a0a0";
+    const hl = activeHighlight();
     for (const e of [
       ...(p.zones ?? []),
       ...(p.traces ?? []),
@@ -594,8 +635,44 @@ export function createCopperEditor(
         if (!("points" in e) || drag.vertex < 0)
           ctx.translate(cursor.x - drag.start.x, cursor.y - drag.start.y);
       }
-      if (highlight() && e.netId !== highlight()) ctx.globalAlpha = 0.2;
+      if (hl && e.netId !== hl) ctx.globalAlpha = 0.2;
       const isSel = selected() === e.id || Boolean(selectedIds?.has(e.id));
+      const isHl = Boolean(hl && e.netId === hl);
+      if (isHl && !isSel) {
+        ctx.save();
+        if ("points" in e) {
+          if ("width" in e) {
+            ctx.beginPath();
+            e.points.forEach((q, i) =>
+              i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y),
+            );
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = Number(e.width) + 3 / scale;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.globalAlpha = 0.85;
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            e.points.forEach((q, i) =>
+              i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y),
+            );
+            ctx.closePath();
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2.5 / scale;
+            ctx.globalAlpha = 0.9;
+            ctx.stroke();
+          }
+        } else {
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, e.diameter / 2 + 2.5 / scale, 0, Math.PI * 2);
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2 / scale;
+          ctx.globalAlpha = 0.9;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       ctx.strokeStyle = isSel ? "#ffcd11" : color(e);
       ctx.fillStyle = color(e);
       ctx.lineJoin = "round";
@@ -659,7 +736,7 @@ export function createCopperEditor(
     // Screen-sized rings stay readable at every zoom. Suppress stale draft positions.
     if (!drag && !offset?.dx && !offset?.dy) {
       ctx.save();
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = hl ? 0.2 : 1;
       ctx.strokeStyle = "#ff5555";
       ctx.lineWidth = 2 / scale;
       ctx.setLineDash([]);
@@ -737,199 +814,6 @@ export function createCopperEditor(
       }
     }
   }
-  const NetSelector = (props: {
-    value: () => string;
-    onChange: (id: string) => void;
-    onAdd: (name: string) => void;
-    disabled?: boolean;
-  }) => {
-    const [open, setOpen] = createSignal(false);
-    const [filter, setFilter] = createSignal("");
-    const nets = () => pcb()?.nets ?? [];
-    const currentNet = () => nets().find((n) => n.id === props.value());
-    const filteredNets = () => {
-      const q = filter().trim().toLowerCase();
-      if (!q) return nets();
-      return nets().filter((n) => n.name.toLowerCase().includes(q));
-    };
-
-    const handleAdd = () => {
-      const val = filter().trim();
-      if (!val) return;
-      props.onAdd(val);
-      setFilter("");
-      setOpen(false);
-    };
-
-    return (
-      <div class="ve-net-selector">
-        <div class="ve-net-selector-header">
-          <span>Net</span>
-          <span class="ve-net-current-badge">
-            <Show
-              when={currentNet()}
-              fallback={<span class="muted">Unassigned</span>}
-            >
-              {(net) => (
-                <>
-                  <span
-                    class="ve-net-dot"
-                    style={{ background: net().color }}
-                    aria-hidden="true"
-                  />
-                  {net().name}
-                </>
-              )}
-            </Show>
-          </span>
-        </div>
-        <div class="ve-net-input-bar">
-          <input
-            type="text"
-            role="combobox"
-            aria-label="Net"
-            aria-expanded={open()}
-            aria-autocomplete="list"
-            disabled={props.disabled}
-            placeholder={currentNet() ? currentNet()!.name : "Assign net…"}
-            value={open() ? filter() : (currentNet()?.name ?? "")}
-            onClick={() => {
-              if (!open()) {
-                setOpen(true);
-                setFilter("");
-              }
-            }}
-            onFocus={() => {
-              if (!open()) {
-                setOpen(true);
-                setFilter("");
-              }
-            }}
-            onInput={(e) => {
-              setFilter(e.currentTarget.value);
-              if (!open()) setOpen(true);
-            }}
-            onChange={(e) => {
-              const val = e.currentTarget.value.trim();
-              if (!val || val.toLowerCase() === "unassigned") {
-                props.onChange("");
-                setOpen(false);
-                setFilter("");
-                return;
-              }
-              const match = nets().find(
-                (n) =>
-                  n.id === val || n.name.toLowerCase() === val.toLowerCase(),
-              );
-              if (match) {
-                props.onChange(match.id);
-                setOpen(false);
-                setFilter("");
-              } else {
-                props.onAdd(val);
-                setOpen(false);
-                setFilter("");
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                const val = filter().trim();
-                if (!val || val.toLowerCase() === "unassigned") {
-                  props.onChange("");
-                  setOpen(false);
-                  setFilter("");
-                  return;
-                }
-                const match = nets().find(
-                  (n) =>
-                    n.id === val || n.name.toLowerCase() === val.toLowerCase(),
-                );
-                if (match) {
-                  props.onChange(match.id);
-                  setOpen(false);
-                  setFilter("");
-                } else {
-                  handleAdd();
-                }
-              } else if (e.key === "Escape") {
-                setOpen(false);
-                setFilter("");
-              }
-            }}
-            onBlur={() => {
-              window.setTimeout(() => {
-                if (open()) {
-                  setOpen(false);
-                  setFilter("");
-                }
-              }, 150);
-            }}
-          />
-          <button
-            type="button"
-            class="ve-net-add-btn"
-            aria-label="Add net"
-            title="Add net"
-            disabled={props.disabled || !filter().trim()}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleAdd}
-          >
-            +
-          </button>
-        </div>
-        <Show when={open()}>
-          <div class="ve-net-dropdown" role="listbox" aria-label="Nets list">
-            <button
-              type="button"
-              class="ve-net-item"
-              data-selected={!props.value()}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                props.onChange("");
-                setOpen(false);
-                setFilter("");
-              }}
-            >
-              <span class="ve-net-dot unassigned" aria-hidden="true" />
-              <span class="ve-net-item-name">Unassigned</span>
-              <Show when={!props.value()}>
-                <span class="ve-net-check">✓</span>
-              </Show>
-            </button>
-            <For each={filteredNets()}>
-              {(n) => (
-                <button
-                  type="button"
-                  class="ve-net-item"
-                  data-selected={n.id === props.value()}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    props.onChange(n.id);
-                    setOpen(false);
-                    setFilter("");
-                  }}
-                >
-                  <span
-                    class="ve-net-dot"
-                    style={{ background: n.color }}
-                    aria-hidden="true"
-                  />
-                  <span class="ve-net-item-name">{n.name}</span>
-                  <Show when={n.id === props.value()}>
-                    <span class="ve-net-check">✓</span>
-                  </Show>
-                </button>
-              )}
-            </For>
-            <Show when={filteredNets().length === 0 && filter().trim()}>
-              <div class="ve-net-empty">No matching nets</div>
-            </Show>
-          </div>
-        </Show>
-      </div>
-    );
-  };
   const Toolbar = () => (
     <>
       <label>
@@ -1002,6 +886,7 @@ export function createCopperEditor(
           <Show when={mode() !== "select"}>
             <p>New {mode()}</p>
             <NetSelector
+              nets={() => pcb()?.nets ?? []}
               value={placementNet}
               onChange={setPlacementNet}
               onAdd={(name) => {
@@ -1093,6 +978,7 @@ export function createCopperEditor(
               {e.locked ? "Unlock" : "Lock"}
             </button>
             <NetSelector
+              nets={() => pcb()?.nets ?? []}
               value={() => e.netId ?? ""}
               onChange={(id) =>
                 patch((target) => {
@@ -1487,6 +1373,14 @@ export function createCopperEditor(
       return false;
     },
     drawing: () => mode() !== "select",
+    highlightedNet: () => activeHighlight(),
+    locate,
+    clearHover: () => {
+      if (hoverNet()) {
+        setHoverNet("");
+        changed();
+      }
+    },
     cancelDrag: () => {
       drag = null;
       changed();
